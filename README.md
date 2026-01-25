@@ -5,7 +5,7 @@ output:
 ---
 # smMIP Analysis Pipeline Overview
 ## This pipeline utilizes the smMIPTools tool set that can be found at https://github.com/abelson-lab/smMIP-tools
-## This pipeline impliments alignment, parallel processing and sample/patient reports based on final smMIPTools output
+## This pipeline impliments alignment, pre-filtering BAM files systems that may get bloated in R, parallel processing and sample/patient reports based on final smMIPTools output
 
 ## Quick Start
 
