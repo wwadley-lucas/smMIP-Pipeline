@@ -27,8 +27,8 @@ option_list <- list(
               help = "Output directory for patient reports [default: patient_reports]", metavar = "DIR"),
   make_option(c("-c", "--code"), type = "character", default = NULL,
               help = "Path to CHIP R code directory (for sourcing dependencies)", metavar = "DIR"),
-  make_option(c("-f", "--format"), type = "character", default = "html",
-              help = "Report format: html or pdf [default: html]", metavar = "FMT"),
+  make_option(c("-f", "--format"), type = "character", default = "both",
+              help = "Report format: html, pdf, or both [default: both]", metavar = "FMT"),
   make_option(c("--skip_clinvar"), action = "store_true", default = FALSE,
               help = "Skip ClinVar API queries (faster, uses only knowledge base)"),
   make_option(c("--no_dedupe"), action = "store_true", default = FALSE,
@@ -486,35 +486,87 @@ generate_single_report <- function(sample_id, filtered_data = NULL,
     "patient_report_template.Rmd"
   }
 
-  # Output file path with correct extension
-  file_ext <- ifelse(tolower(report_format) == "pdf", ".pdf", ".html")
-  output_file <- file.path(output_dir, paste0(sample_id, "_CHIP_Report", file_ext))
+  # Determine which formats to generate
+  generate_pdf <- tolower(report_format) %in% c("both", "pdf")
+  generate_html <- tolower(report_format) %in% c("both", "html")
 
-  # Render report
-  cat("\nRendering", toupper(report_format), "report...\n")
+  output_files <- c()
 
-  tryCatch({
-    rmarkdown::render(
-      input = template_path,
-      output_file = basename(output_file),
-      output_dir = output_dir,
-      output_format = ifelse(tolower(report_format) == "pdf", "pdf_document", "html_document"),
-      params = list(
-        sample_id = sample_id,
-        mutations_high = mutations_high,
-        mutations_low = mutations_low,
-        report_date = Sys.Date()
-      ),
-      quiet = TRUE
-    )
+  # Always generate HTML first (needed for PDF conversion too)
+  html_file <- file.path(output_dir, paste0(sample_id, "_CHIP_Report.html"))
 
-    cat("Report generated successfully:", output_file, "\n")
-    return(output_file)
+  if (generate_html || generate_pdf) {
+    cat("\nRendering HTML report...\n")
 
-  }, error = function(e) {
-    cat("ERROR generating report:", e$message, "\n")
+    tryCatch({
+      rmarkdown::render(
+        input = template_path,
+        output_file = basename(html_file),
+        output_dir = output_dir,
+        output_format = "html_document",
+        params = list(
+          sample_id = sample_id,
+          mutations_high = mutations_high,
+          mutations_low = mutations_low,
+          report_date = Sys.Date()
+        ),
+        quiet = TRUE
+      )
+
+      cat("Report generated successfully:", html_file, "\n")
+      if (generate_html) {
+        output_files <- c(output_files, html_file)
+      }
+
+    }, error = function(e) {
+      cat("ERROR generating HTML report:", e$message, "\n")
+      return(NULL)
+    })
+  }
+
+  # Convert HTML to PDF using weasyprint if requested
+  if (generate_pdf && file.exists(html_file)) {
+    pdf_file <- file.path(output_dir, paste0(sample_id, "_CHIP_Report.pdf"))
+    cat("Converting to PDF...\n")
+
+    # Try weasyprint first, then wkhtmltopdf
+    pdf_result <- tryCatch({
+      system2("weasyprint", args = c(html_file, pdf_file), stdout = TRUE, stderr = TRUE)
+      if (file.exists(pdf_file)) {
+        cat("PDF generated successfully:", pdf_file, "\n")
+        output_files <- c(output_files, pdf_file)
+        TRUE
+      } else {
+        FALSE
+      }
+    }, error = function(e) {
+      cat("weasyprint not available, trying wkhtmltopdf...\n")
+      FALSE
+    })
+
+    if (!pdf_result) {
+      tryCatch({
+        system2("wkhtmltopdf", args = c("--quiet", html_file, pdf_file), stdout = TRUE, stderr = TRUE)
+        if (file.exists(pdf_file)) {
+          cat("PDF generated successfully:", pdf_file, "\n")
+          output_files <- c(output_files, pdf_file)
+        }
+      }, error = function(e) {
+        cat("WARNING: Could not generate PDF (weasyprint/wkhtmltopdf not available)\n")
+      })
+    }
+
+    # If only PDF was requested, remove HTML
+    if (!generate_html && file.exists(html_file)) {
+      file.remove(html_file)
+    }
+  }
+
+  if (length(output_files) > 0) {
+    return(output_files)
+  } else {
     return(NULL)
-  })
+  }
 }
 
 #' Generate reports for all patients/samples

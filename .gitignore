@@ -5,3 +5,4 @@
 # LaTeX build artifacts
 *.aux
 *.log
+annotation_cache/
