@@ -9,14 +9,14 @@ output:
 
 ```bash
 # Basic pipeline (Stages 1-6: FASTQ to mutation calls)
-bash /Volumes/Seq_SSD/smMIP/Universal/Code/Master_pipeline.sh \
-  --directory /Volumes/Seq_SSD/smMIP/KG001_01.22.25 \
-  --fastq_dir /Volumes/Seq_SSD/smMIP/KG001_01.22.25/RAW_FASTQ
+bash /path/to/smMIP-Pipeline/Master_pipeline.sh \
+  --directory /path/to/experiment \
+  --fastq_dir /path/to/experiment/RAW_FASTQ
 
 # Full pipeline with CHIP analysis (Stages 1-8)
-bash /Volumes/Seq_SSD/smMIP/Universal/Code/Master_pipeline.sh \
-  --directory /Volumes/Seq_SSD/smMIP/KG001_01.22.25 \
-  --fastq_dir /Volumes/Seq_SSD/smMIP/KG001_01.22.25/RAW_FASTQ \
+bash /path/to/smMIP-Pipeline/Master_pipeline.sh \
+  --directory /path/to/experiment \
+  --fastq_dir /path/to/experiment/RAW_FASTQ \
   --chip_analysis
 ```
 
