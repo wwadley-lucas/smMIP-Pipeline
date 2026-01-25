@@ -55,13 +55,13 @@ bash /path/to/smMIP-Pipeline/Master_pipeline.sh \
 | `--use_parallel` | false | Use parallel versions of scripts (flag) |
 | `--force` | false | Force re-run all stages even if outputs exist |
 | `--start` | 1 | Start at this stage (1-8) |
-| `--stop` | 6 | Stop after this stage (1-8) |
+| `--stop` | 8 | Stop after this stage (1-8) |
 
 ### CHIP Analysis Parameters (Stages 7-8)
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `--chip_analysis` | - | Enable CHIP analysis (sets --stop 8) |
+| `--chip_analysis` | - | Shorthand for --stop 8 (CHIP analysis stages) |
 | `--chip_vaf` | 0.01 | VAF threshold for CHIP filtering |
 | `--chip_pval` | 0.05 | P-value threshold for CHIP filtering |
 | `--skip_reports` | false | Skip patient report generation (Stage 8) |
