@@ -8,9 +8,16 @@ output:
 ## Quick Start
 
 ```bash
+# Basic pipeline (Stages 1-6: FASTQ to mutation calls)
 bash /Volumes/Seq_SSD/smMIP/Universal/Code/Master_pipeline.sh \
   --directory /Volumes/Seq_SSD/smMIP/KG001_01.22.25 \
   --fastq_dir /Volumes/Seq_SSD/smMIP/KG001_01.22.25/RAW_FASTQ
+
+# Full pipeline with CHIP analysis (Stages 1-8)
+bash /Volumes/Seq_SSD/smMIP/Universal/Code/Master_pipeline.sh \
+  --directory /Volumes/Seq_SSD/smMIP/KG001_01.22.25 \
+  --fastq_dir /Volumes/Seq_SSD/smMIP/KG001_01.22.25/RAW_FASTQ \
+  --chip_analysis
 ```
 
 ## Pipeline Stages
@@ -23,6 +30,8 @@ bash /Volumes/Seq_SSD/smMIP/Universal/Code/Master_pipeline.sh \
 | 4 | Level_Bas_Calls.sh | Generate variant pileups at smMIP level |
 | 5 | Annotate_SNVs.R | Annotate panel with gene/protein/COSMIC info |
 | 6 | calling_mutations.R | Call mutations using statistical error modeling |
+| 7 | CHIP_analysis.R | Population-level CHIP analysis (oncoplots, VAF heatmaps) |
+| 8 | generate_patient_reports.R | Generate individual patient HTML/PDF reports |
 
 ## Command-Line Parameters
 
@@ -45,8 +54,19 @@ bash /Volumes/Seq_SSD/smMIP/Universal/Code/Master_pipeline.sh \
 | `--parallel_jobs` | 4 | Samples to run in parallel |
 | `--use_parallel` | false | Use parallel versions of scripts (flag) |
 | `--force` | false | Force re-run all stages even if outputs exist |
-| `--start` | 1 | Start at this stage (1-6) |
-| `--stop` | 6 | Stop after this stage (1-6) |
+| `--start` | 1 | Start at this stage (1-8) |
+| `--stop` | 6 | Stop after this stage (1-8) |
+
+### CHIP Analysis Parameters (Stages 7-8)
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `--chip_analysis` | - | Enable CHIP analysis (sets --stop 8) |
+| `--chip_vaf` | 0.01 | VAF threshold for CHIP filtering |
+| `--chip_pval` | 0.05 | P-value threshold for CHIP filtering |
+| `--skip_reports` | false | Skip patient report generation (Stage 8) |
+| `--skip_clinvar` | false | Skip ClinVar API queries (faster reports) |
+| `--report_format` | html | Report format: html or pdf |
 
 ## Directory Structure
 
@@ -73,6 +93,17 @@ bash /Volumes/Seq_SSD/smMIP/Universal/Code/Master_pipeline.sh \
 │   └── _logs/
 ├── results/                    # Stage 6 output
 │   └── called_mutations.txt
+├── CHIP_analysis/              # Stages 7-8 output
+│   ├── CHIP_oncoplot.pdf/png
+│   ├── VAF_heatmap.pdf/png
+│   ├── VAF_dotplot.pdf/png
+│   ├── co_mutation_heatmap.pdf
+│   ├── gene_mutation_summary.csv
+│   ├── variant_annotation_summary.csv
+│   ├── co_mutation_fisher_results.csv
+│   └── patient_reports/
+│       ├── {sample}_CHIP_Report.html
+│       └── annotation_cache/
 └── config.txt                  # Sample configuration
 ```
 
@@ -142,6 +173,36 @@ FASTQ files (*.R1*.fastq.gz, *.R2*.fastq.gz)
     │
     ▼
   called_mutations.txt
+    │
+    ▼ (Optional: --chip_analysis)
+┌─────────────────────────────────────────────────────────────┐
+│ Stage 7: CHIP Population Analysis                           │
+│ R Script: CHIP_analysis.R                                   │
+│ Input:  called_mutations.txt                                │
+│ Output: - CHIP_oncoplot.pdf/png (mutation landscape)        │
+│         - VAF_heatmap.pdf/png (allele frequency matrix)     │
+│         - VAF_dotplot.pdf/png (VAF distribution)            │
+│         - co_mutation_heatmap.pdf (gene co-occurrence)      │
+│         - gene_mutation_summary.csv                         │
+│         - variant_annotation_summary.csv                    │
+│         - co_mutation_fisher_results.csv                    │
+└─────────────────────────────────────────────────────────────┘
+    │
+    ▼
+┌─────────────────────────────────────────────────────────────┐
+│ Stage 8: Patient Report Generation                          │
+│ R Script: generate_patient_reports.R                        │
+│ Input:  called_mutations.txt                                │
+│ Output: - patient_reports/{sample}_CHIP_Report.html         │
+│         Per-patient clinical-style reports with:            │
+│         - CHIP gene mutation summary                        │
+│         - ClinVar annotations                               │
+│         - Clinical significance assessment                  │
+│         - VAF visualizations                                │
+└─────────────────────────────────────────────────────────────┘
+    │
+    ▼
+  Patient Reports (HTML/PDF)
 ```
 
 ## Configuration File Format
@@ -221,6 +282,40 @@ Key columns in the final mutation calls:
 | SSCS.* | Consensus-based metrics |
 | flags | Quality flags |
 
+## Output: CHIP Analysis (Stages 7-8)
+
+### Stage 7 Outputs
+
+| File | Description |
+|------|-------------|
+| `CHIP_oncoplot.pdf/png` | Mutation landscape visualization showing genes x samples |
+| `VAF_heatmap.pdf/png` | Heatmap of variant allele frequencies |
+| `VAF_dotplot.pdf/png` | Distribution of VAFs per gene |
+| `co_mutation_heatmap.pdf` | Gene co-occurrence/mutual exclusivity analysis |
+| `gene_mutation_summary.csv` | Frequency statistics per gene |
+| `variant_annotation_summary.csv` | Per-variant details with protein changes |
+| `co_mutation_fisher_results.csv` | Fisher's exact test results for co-mutation |
+
+### Stage 8 Outputs
+
+| File | Description |
+|------|-------------|
+| `patient_reports/{sample}_CHIP_Report.html` | Individual patient reports with: |
+| | - Clinically significant mutations (VAF ≥ 1%) |
+| | - Emerging clones (VAF < 1%) |
+| | - CHIP gene clinical summaries |
+| | - ClinVar pathogenicity annotations |
+| | - VAF visualizations |
+
+### CHIP Analysis Parameters
+
+| Parameter | CLI Flag | Default | Description |
+|-----------|----------|---------|-------------|
+| VAF threshold | `--chip_vaf` | 0.01 | Minimum VAF for CHIP filtering |
+| P-value threshold | `--chip_pval` | 0.05 | Maximum p-value for filtering |
+| Skip ClinVar | `--skip_clinvar` | false | Use local knowledge base only |
+| Report format | `--report_format` | html | Output format: html or pdf |
+
 ## Usage Examples
 
 ### Full Pipeline Run
@@ -261,6 +356,36 @@ bash Master_pipeline.sh \
   --force
 ```
 
+### Run CHIP Analysis on Existing Mutations
+
+```bash
+# Run only CHIP stages (7-8) on existing called_mutations.txt
+bash Master_pipeline.sh \
+  --directory /path/to/experiment \
+  --start 7 --stop 8
+```
+
+### Full Pipeline with CHIP Analysis
+
+```bash
+bash Master_pipeline.sh \
+  --directory /path/to/experiment \
+  --fastq_dir /path/to/fastqs \
+  --chip_analysis \
+  --report_format html
+```
+
+### CHIP Analysis with Custom Thresholds
+
+```bash
+bash Master_pipeline.sh \
+  --directory /path/to/experiment \
+  --start 7 --stop 8 \
+  --chip_vaf 0.02 \
+  --chip_pval 0.01 \
+  --skip_clinvar  # Faster, uses local knowledge base only
+```
+
 ### Custom Panel and Reference
 
 ```bash
@@ -284,6 +409,8 @@ bash Master_pipeline.sh \
 | 4 (Pileup) | ~25 GB | R memory-intensive |
 | 5 (Annotate) | ~8 GB | Network-bound (API calls) |
 | 6 (Mutations) | ~16 GB | Depends on cohort size |
+| 7 (CHIP) | ~16 GB | Scales with cohort size |
+| 8 (Reports) | ~8 GB | Per-sample, ClinVar API calls |
 
 ### Recommended Settings
 
@@ -304,12 +431,23 @@ bash Master_pipeline.sh \
 
 ### R Packages
 
+Core Pipeline:
 - optparse
 - data.table
 - parallel
 - cellbaseR (for annotation)
 - IRanges
 - Rsamtools
+
+CHIP Analysis (Stages 7-8):
+- tidyverse
+- ComplexHeatmap (Bioconductor)
+- circlize
+- RColorBrewer
+- rmarkdown
+- knitr
+- kableExtra
+- rentrez (for ClinVar API)
 
 ## Troubleshooting
 

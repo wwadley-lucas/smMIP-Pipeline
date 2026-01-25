@@ -29,6 +29,14 @@ STOP_STAGE=6
 # R script directory
 CODE_DIR="${UNIVERSAL_DIR}/Code/R"
 
+# CHIP analysis settings
+CHIP_VAF=0.01
+CHIP_PVAL=0.05
+SKIP_REPORTS=false
+SKIP_CLINVAR=false
+REPORT_FORMAT="html"
+CHIP_CODE_DIR="${CODE_DIR}/CHIP"
+
 # Pileup settings (can be customized)
 MMQ=20
 MBQ=25
@@ -61,9 +69,17 @@ Optional:
   --parallel_jobs N      Samples to run in parallel (default: 4)
   --use_parallel         Use parallel versions of scripts (flag)
   --force                Force re-run all stages even if outputs exist
-  --start N              Start at this stage (1-6, default: 1)
-  --stop N               Stop after this stage (1-6, default: 6)
+  --start N              Start at this stage (1-8, default: 1)
+  --stop N               Stop after this stage (1-8, default: 6)
   -h, --help             Show this help message
+
+CHIP Analysis Options:
+  --chip_analysis        Enable CHIP analysis (sets --stop 8)
+  --chip_vaf N           VAF threshold for CHIP filtering (default: 0.01)
+  --chip_pval N          P-value threshold for CHIP filtering (default: 0.05)
+  --skip_reports         Skip patient report generation (Stage 8)
+  --skip_clinvar         Skip ClinVar API queries in reports (faster)
+  --report_format FMT    Report format: html or pdf (default: html)
 
 Stages:
   1 - BWA alignment
@@ -72,10 +88,22 @@ Stages:
   4 - Pileup generation (Level base calls)
   5 - Panel annotation (skipped if annotated panel exists)
   6 - Mutation calling
+  7 - CHIP population analysis (oncoplots, VAF heatmaps, co-mutation)
+  8 - Patient report generation (individual HTML/PDF reports)
 
 Example:
+  # Full pipeline from FASTQ to mutation calls
   $0 --directory /Volumes/Seq_SSD/smMIP/KG001_01.22.25 \\
      --fastq_dir /Volumes/Seq_SSD/smMIP/KG001_01.22.25/RAW_FASTQ
+
+  # Run with CHIP analysis (includes stages 7-8)
+  $0 --directory /Volumes/Seq_SSD/smMIP/KG001_01.22.25 \\
+     --fastq_dir /Volumes/Seq_SSD/smMIP/KG001_01.22.25/RAW_FASTQ \\
+     --chip_analysis
+
+  # Run only CHIP stages on existing mutation calls
+  $0 --directory /Volumes/Seq_SSD/smMIP/KG001_01.22.25 \\
+     --start 7 --stop 8
 
 Output Structure:
   {directory}/
@@ -83,7 +111,13 @@ Output Structure:
   ├── filtered_bam/      # Stage 2: Filtered BAMs
   ├── Read_Processing/   # Stage 3: Processed reads
   │   └── pileup/        # Stage 4: Pileup files
-  └── results/           # Stage 6: Mutation calls
+  ├── results/           # Stage 6: Mutation calls
+  └── CHIP_analysis/     # Stages 7-8: CHIP outputs
+      ├── CHIP_oncoplot.pdf/png
+      ├── VAF_heatmap.pdf/png
+      ├── gene_mutation_summary.csv
+      └── patient_reports/
+          └── *_CHIP_Report.html
 EOF
 }
 
@@ -206,6 +240,12 @@ while [[ $# -gt 0 ]]; do
     --force) FORCE=true; shift;;
     --start) START_STAGE="$2"; shift 2;;
     --stop) STOP_STAGE="$2"; shift 2;;
+    --chip_analysis) STOP_STAGE=8; shift;;
+    --chip_vaf) CHIP_VAF="$2"; shift 2;;
+    --chip_pval) CHIP_PVAL="$2"; shift 2;;
+    --skip_reports) SKIP_REPORTS=true; shift;;
+    --skip_clinvar) SKIP_CLINVAR=true; shift;;
+    --report_format) REPORT_FORMAT="$2"; shift 2;;
     -h|--help) usage; exit 0;;
     *) error "Unknown argument: $1";;
   esac
@@ -215,16 +255,21 @@ done
 [[ -z "$DIRECTORY" ]] && { usage; error "--directory is required"; }
 
 # Validate stage range
-[[ "$START_STAGE" -lt 1 || "$START_STAGE" -gt 6 ]] && error "--start must be between 1 and 6"
-[[ "$STOP_STAGE" -lt 1 || "$STOP_STAGE" -gt 6 ]] && error "--stop must be between 1 and 6"
+[[ "$START_STAGE" -lt 1 || "$START_STAGE" -gt 8 ]] && error "--start must be between 1 and 8"
+[[ "$STOP_STAGE" -lt 1 || "$STOP_STAGE" -gt 8 ]] && error "--stop must be between 1 and 8"
 [[ "$START_STAGE" -gt "$STOP_STAGE" ]] && error "--start cannot be greater than --stop"
 
 # Validate inputs based on start stage
 if [[ "$START_STAGE" -lt 3 ]]; then
   [[ -z "$FASTQ_DIR" ]] && { usage; error "--fastq_dir is required for stages 1-2"; }
   check_dir "$FASTQ_DIR"
+elif [[ "$START_STAGE" -ge 7 ]]; then
+  # Starting from stage 7+ - only need called_mutations.txt
+  if [[ ! -f "${DIRECTORY}/results/called_mutations.txt" ]]; then
+    error "Starting at stage 7 requires existing results/called_mutations.txt. Run Stage 6 first."
+  fi
 else
-  # Starting from stage 3+ - need either BAM_DIR or we'll check for existing filtered_bam later
+  # Starting from stage 3-6 - need either BAM_DIR or we'll check for existing filtered_bam later
   if [[ -n "$BAM_DIR" ]]; then
     check_dir "$BAM_DIR"
   elif [[ -z "$FASTQ_DIR" ]]; then
@@ -247,6 +292,8 @@ FILTERED_BAM="${DIRECTORY}/filtered_bam"
 READ_PROC_DIR="${DIRECTORY}/Read_Processing"
 PILEUP_DIR="${READ_PROC_DIR}/pileup"
 RESULTS_DIR="${DIRECTORY}/results"
+CHIP_OUT="${DIRECTORY}/CHIP_analysis"
+CHIP_REPORTS_DIR="${CHIP_OUT}/patient_reports"
 
 # Use external BAM_DIR as input for Stage 3 if provided
 if [[ -n "$BAM_DIR" ]]; then
@@ -258,6 +305,10 @@ fi
 
 # ----------- Create Directories -----------
 mkdir -p "$BWA_OUT" "$FILTERED_BAM" "$READ_PROC_DIR" "$PILEUP_DIR" "$RESULTS_DIR"
+# Create CHIP directories only if running stages 7-8
+if [[ "$STOP_STAGE" -ge 7 ]]; then
+  mkdir -p "$CHIP_OUT" "$CHIP_REPORTS_DIR"
+fi
 
 # ----------- Print Configuration -----------
 say "============================================="
@@ -275,6 +326,14 @@ say "Parallel Jobs:    $PARALLEL_JOBS"
 say "Use Parallel:     $USE_PARALLEL"
 say "Force Rerun:      $FORCE"
 say "Stages:           $START_STAGE to $STOP_STAGE"
+if [[ "$STOP_STAGE" -ge 7 ]]; then
+  say "--- CHIP Analysis ---"
+  say "CHIP VAF:         $CHIP_VAF"
+  say "CHIP P-value:     $CHIP_PVAL"
+  say "Skip Reports:     $SKIP_REPORTS"
+  say "Skip ClinVar:     $SKIP_CLINVAR"
+  say "Report Format:    $REPORT_FORMAT"
+fi
 say "============================================="
 
 # =============================================================================
@@ -613,6 +672,99 @@ if [[ "$START_STAGE" -le 6 && "$STOP_STAGE" -ge 6 ]]; then
 fi
 
 # =============================================================================
+# STAGE 7: CHIP Population Analysis
+# =============================================================================
+if [[ "$START_STAGE" -le 7 && "$STOP_STAGE" -ge 7 ]]; then
+  say ""
+  say "========== STAGE 7: CHIP Population Analysis =========="
+
+  MUTATIONS_FILE="${RESULTS_DIR}/called_mutations.txt"
+
+  if [[ ! -f "$MUTATIONS_FILE" ]]; then
+    error "called_mutations.txt not found at $MUTATIONS_FILE. Run Stage 6 first."
+  fi
+
+  # Check if CHIP code directory exists
+  if [[ ! -d "$CHIP_CODE_DIR" ]]; then
+    error "CHIP code directory not found: $CHIP_CODE_DIR"
+  fi
+
+  mkdir -p "$CHIP_OUT"
+
+  say "Running CHIP_analysis.R..."
+  say "  Input: $MUTATIONS_FILE"
+  say "  Output: $CHIP_OUT"
+  say "  VAF threshold: $CHIP_VAF"
+  say "  P-value threshold: $CHIP_PVAL"
+
+  R_MAX_VSIZE=120GB Rscript --no-restore --no-save \
+    "${CHIP_CODE_DIR}/CHIP_analysis.R" \
+    -i "$MUTATIONS_FILE" \
+    -o "$CHIP_OUT" \
+    -c "$CHIP_CODE_DIR" \
+    -v "$CHIP_VAF" \
+    -p "$CHIP_PVAL"
+
+  say "Stage 7 complete."
+
+  # List outputs
+  if [[ -f "${CHIP_OUT}/CHIP_oncoplot.pdf" ]]; then
+    say "Outputs:"
+    say "  - ${CHIP_OUT}/CHIP_oncoplot.pdf"
+    say "  - ${CHIP_OUT}/VAF_heatmap.pdf"
+    say "  - ${CHIP_OUT}/gene_mutation_summary.csv"
+  fi
+fi
+
+# =============================================================================
+# STAGE 8: Patient Report Generation
+# =============================================================================
+if [[ "$START_STAGE" -le 8 && "$STOP_STAGE" -ge 8 ]]; then
+  say ""
+  say "========== STAGE 8: Patient Report Generation =========="
+
+  if [[ "$SKIP_REPORTS" == true ]]; then
+    say "Skipping Stage 8 (--skip_reports flag set)"
+  else
+    MUTATIONS_FILE="${RESULTS_DIR}/called_mutations.txt"
+
+    if [[ ! -f "$MUTATIONS_FILE" ]]; then
+      error "called_mutations.txt not found at $MUTATIONS_FILE. Run Stage 6 first."
+    fi
+
+    # Check if CHIP code directory exists
+    if [[ ! -d "$CHIP_CODE_DIR" ]]; then
+      error "CHIP code directory not found: $CHIP_CODE_DIR"
+    fi
+
+    mkdir -p "$CHIP_REPORTS_DIR"
+
+    say "Running generate_patient_reports.R..."
+    say "  Input: $MUTATIONS_FILE"
+    say "  Output: $CHIP_REPORTS_DIR"
+    say "  Format: $REPORT_FORMAT"
+    say "  Query ClinVar: $(if [[ "$SKIP_CLINVAR" == true ]]; then echo "No"; else echo "Yes"; fi)"
+
+    CLINVAR_FLAG=""
+    [[ "$SKIP_CLINVAR" == true ]] && CLINVAR_FLAG="--skip_clinvar"
+
+    R_MAX_VSIZE=120GB Rscript --no-restore --no-save \
+      "${CHIP_CODE_DIR}/generate_patient_reports.R" \
+      -i "$MUTATIONS_FILE" \
+      -o "$CHIP_REPORTS_DIR" \
+      -c "$CHIP_CODE_DIR" \
+      -f "$REPORT_FORMAT" \
+      $CLINVAR_FLAG
+
+    say "Stage 8 complete."
+
+    # Count generated reports
+    REPORT_COUNT=$(find "$CHIP_REPORTS_DIR" -maxdepth 1 -name "*_CHIP_Report.*" -type f 2>/dev/null | wc -l | tr -d ' ')
+    say "Generated $REPORT_COUNT patient reports in $CHIP_REPORTS_DIR"
+  fi
+fi
+
+# =============================================================================
 # Pipeline Complete
 # =============================================================================
 say ""
@@ -628,6 +780,11 @@ say "Output files:"
 [[ -d "$FILTERED_BAM" ]] && say "  - Filtered BAMs:     $FILTERED_BAM ($(count_files "$FILTERED_BAM" "*.filtered.bam") BAMs)"
 [[ -d "$PILEUP_DIR" ]] && say "  - Pileup files:      $PILEUP_DIR ($(count_files "$PILEUP_DIR" "*_raw_pileup.txt") samples)"
 [[ -f "${RESULTS_DIR}/called_mutations.txt" ]] && say "  - Mutations:         ${RESULTS_DIR}/called_mutations.txt"
+[[ -f "${CHIP_OUT}/CHIP_oncoplot.pdf" ]] && say "  - CHIP Analysis:     $CHIP_OUT"
+[[ -d "$CHIP_REPORTS_DIR" ]] && {
+  REPORT_COUNT=$(find "$CHIP_REPORTS_DIR" -maxdepth 1 -name "*_CHIP_Report.*" -type f 2>/dev/null | wc -l | tr -d ' ')
+  [[ "$REPORT_COUNT" -gt 0 ]] && say "  - Patient Reports:   $CHIP_REPORTS_DIR ($REPORT_COUNT reports)"
+}
 
 say ""
 say "Done."

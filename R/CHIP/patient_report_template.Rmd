@@ -1,0 +1,420 @@
+---
+title: "CHIP Mutation Analysis Report"
+subtitle: "Sample ID: `r params$sample_id`"
+date: "`r format(Sys.Date(), '%B %d, %Y')`"
+output:
+  html_document:
+    toc: true
+    toc_depth: 2
+    toc_float: true
+    number_sections: true
+    theme: flatly
+    highlight: tango
+params:
+  sample_id: "SAMPLE"
+  mutations_high: NULL
+  mutations_low: NULL
+  gene_info: NULL
+  report_date: !r Sys.Date()
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
+library(knitr)
+library(kableExtra)
+library(dplyr)
+library(stringr)
+
+# Load helper functions
+source("chip_knowledge_base.R")
+
+#' Format variant for display
+#' Uses protein_change if available, otherwise constructs from genomic info
+format_variant_display <- function(protein_change, variant_class, chr, pos, ref, alt) {
+  # If we have a protein change, use it
+  if (!is.na(protein_change) && protein_change != "" && protein_change != "NA") {
+    return(protein_change)
+  }
+
+  # Otherwise, describe the variant type
+  if (!is.na(variant_class) && variant_class != "" && variant_class != "NA") {
+    # For indels, add position context
+    if (variant_class %in% c("Insertion", "Deletion", "Frameshift")) {
+      return(paste0(variant_class, " at ", chr, ":", pos))
+    }
+    return(variant_class)
+  }
+
+  # Fallback to genomic coordinates
+  return(paste0(chr, ":", pos, " ", ref, ">", alt))
+}
+
+#' Get display type - uses derived variant_class
+format_type_display <- function(variant_class, variant_type) {
+  # Prefer the derived variant_class
+  if (!is.na(variant_class) && variant_class != "" && variant_class != "NA") {
+    return(variant_class)
+  }
+
+  # Fall back to original variant_type if available
+  if (!is.na(variant_type) && variant_type != "" && variant_type != "NA") {
+    return(variant_type)
+  }
+
+  return("Unknown")
+}
+```
+
+---
+
+# Executive Summary
+
+```{r summary-stats}
+n_high <- if (!is.null(params$mutations_high)) nrow(params$mutations_high) else 0
+n_low <- if (!is.null(params$mutations_low)) nrow(params$mutations_low) else 0
+n_total <- n_high + n_low
+
+# Get unique genes for risk assessment
+all_genes <- c()
+if (n_high > 0) all_genes <- c(all_genes, params$mutations_high$gene)
+if (n_low > 0) all_genes <- c(all_genes, params$mutations_low$gene)
+unique_genes <- unique(all_genes)
+
+# Get overall risk assessment
+risk_assessment <- assess_overall_risk(unique_genes)
+```
+
+## Sample Information
+
+| Parameter | Value |
+|:----------|:------|
+| Sample ID | `r params$sample_id` |
+| Report Date | `r format(params$report_date, '%B %d, %Y')` |
+| Analysis Type | CHIP Mutation Panel (smMIPTools) |
+
+## Results Overview
+
+| Category | Count |
+|:---------|:------|
+| **Clinically Significant Mutations (VAF >= 1%)** | `r n_high` |
+| Emerging/Monitoring Mutations (VAF < 1%) | `r n_low` |
+| **Total Mutations Detected** | `r n_total` |
+| Genes Affected | `r length(unique_genes)` |
+
+## Overall Risk Assessment
+
+**Risk Category: `r risk_assessment$overall_risk`**
+`r risk_assessment$explanation`
+
+```{r risk-box, results='asis'}
+if (risk_assessment$overall_risk %in% c("Very High", "High")) {
+  cat("\n\n> **CLINICAL ACTION RECOMMENDED**: This mutation profile warrants hematology/oncology referral and close monitoring.\n\n")
+} else if (risk_assessment$overall_risk == "Intermediate-High") {
+  cat("\n\n> **NOTE**: Consider hematology consultation and more frequent monitoring.\n\n")
+}
+```
+
+---
+
+# Clinically Significant Mutations (VAF >= 1%)
+These mutations are present at variant allele frequencies at or above the 1% threshold, indicating established clonal populations that may warrant clinical attention.
+
+```{r high-vaf-table, results='asis'}
+if (n_high > 0) {
+  # Check if clinical_significance column exists
+  has_clinvar <- "clinical_significance" %in% names(params$mutations_high)
+
+  high_table <- params$mutations_high %>%
+    rowwise() %>%
+    mutate(
+      VAF_pct = sprintf("%.2f%%", SSCS.allele.frequency * 100),
+      # Use the format functions for proper display
+      Variant_Display = format_variant_display(
+        protein_change, variant_class, chr, pos, ref, alt
+      ),
+      Type_Display = format_type_display(variant_class, variant_type),
+      ClinVar = if (has_clinvar) {
+        ifelse(is.na(clinical_significance) | clinical_significance == "",
+               "Not queried", clinical_significance)
+      } else {
+        "Not queried"
+      }
+    ) %>%
+    ungroup() %>%
+    select(Gene = gene,
+           Variant = Variant_Display,
+           `VAF (SSCS)` = VAF_pct,
+           Type = Type_Display,
+           `ClinVar Classification` = ClinVar) %>%
+    distinct()
+
+  kable(high_table, format = "html", booktabs = TRUE,
+        caption = "Mutations with VAF >= 1% (Clinically Significant)",
+        longtable = TRUE) %>%
+    kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"))
+} else {
+  cat("\n\n*No mutations detected at or above 1% VAF.*\n\n")
+}
+```
+
+```{r high-vaf-details, results='asis'}
+if (n_high > 0) {
+  cat("\n\n## Detailed Mutation Interpretations\n\n")
+
+  # Select only columns that exist
+  base_cols <- c("gene", "protein_change", "variant_class", "chr", "pos", "ref", "alt",
+                 "SSCS.allele.frequency", "variant_type")
+  optional_cols <- c("clinical_significance", "clinvar_conditions")
+  available_cols <- intersect(c(base_cols, optional_cols), names(params$mutations_high))
+
+  unique_mutations <- params$mutations_high %>%
+    select(all_of(available_cols)) %>%
+    distinct()
+
+  # Add missing optional columns as NA
+  if (!"clinical_significance" %in% names(unique_mutations)) {
+    unique_mutations$clinical_significance <- NA
+  }
+  if (!"clinvar_conditions" %in% names(unique_mutations)) {
+    unique_mutations$clinvar_conditions <- NA
+  }
+
+  for (i in 1:nrow(unique_mutations)) {
+    mut <- unique_mutations[i, ]
+    gene_info <- get_gene_info(mut$gene)
+
+    # Gene header with variant if available
+    cat(sprintf("\n\n### %s", mut$gene))
+    if (!is.na(mut$protein_change) && mut$protein_change != "" && mut$protein_change != "NA") {
+      cat(sprintf(" %s", mut$protein_change))
+    } else if (!is.na(mut$variant_class) && mut$variant_class %in% c("Insertion", "Deletion")) {
+      cat(sprintf(" (%s)", mut$variant_class))
+    }
+    cat("\n\n")
+
+    # VAF and variant type - use derived variant_class
+    cat(sprintf("**VAF:** %.2f%% | ", mut$SSCS.allele.frequency * 100))
+    type_display <- format_type_display(mut$variant_class, mut$variant_type)
+    cat(sprintf("**Variant Type:** %s\n\n", type_display))
+
+    # Genomic location for indels without protein annotation
+    if ((is.na(mut$protein_change) || mut$protein_change == "") &&
+        mut$variant_class %in% c("Insertion", "Deletion", "Frameshift")) {
+      cat(sprintf("**Genomic Location:** %s:%s %s>%s\n\n",
+                  mut$chr, mut$pos, mut$ref, mut$alt))
+    }
+
+    # ClinVar information
+    if (!is.na(mut$clinical_significance) &&
+        mut$clinical_significance != "" &&
+        !grepl("Not found", mut$clinical_significance, ignore.case = TRUE)) {
+      cat(sprintf("**ClinVar Classification:** %s\n\n", mut$clinical_significance))
+      if (!is.na(mut$clinvar_conditions) && mut$clinvar_conditions != "") {
+        cat(sprintf("**Associated Conditions:** %s\n\n", mut$clinvar_conditions))
+      }
+    } else {
+      cat("**ClinVar Classification:** Not found in ClinVar database\n\n")
+    }
+
+    # Gene-level information from knowledge base
+    if (!is.null(gene_info)) {
+      cat(sprintf("**Gene Function:** %s\n\n", gene_info$gene_function))
+      cat(sprintf("**Clinical Significance in CHIP:** %s\n\n", gene_info$clinical_significance))
+      cat(sprintf("**Risk Category:** %s\n\n", gene_info$risk_category))
+
+      # Check for hotspot
+      if (!is.na(mut$protein_change) && mut$protein_change != "") {
+        if (is_hotspot_mutation(mut$gene, mut$protein_change)) {
+          cat("**Note:** This is a known hotspot mutation with established pathogenicity.\n\n")
+        }
+      }
+
+      cat(sprintf("**Monitoring Recommendation:** %s\n\n", gene_info$monitoring_recommendation))
+      cat(sprintf("**Key References:** %s\n\n", gene_info$references))
+    }
+
+    cat("---\n\n")
+  }
+}
+```
+
+---
+
+# Emerging Mutations (VAF < 1%)
+These mutations are detected below the 1% VAF threshold. While below the WHO-defined CHIP threshold (2%), these represent emerging clones that warrant monitoring.
+
+```{r low-vaf-warning, results='asis'}
+cat("\n\n> **Important:** Mutations below 1% VAF are at the limit of reliable detection and should be interpreted with caution. Consider confirmatory testing if clinically relevant.\n\n")
+```
+
+```{r low-vaf-table, results='asis'}
+if (n_low > 0) {
+  # Check if clinical_significance column exists
+  has_clinvar <- "clinical_significance" %in% names(params$mutations_low)
+
+  low_table <- params$mutations_low %>%
+    rowwise() %>%
+    mutate(
+      VAF_pct = sprintf("%.3f%%", SSCS.allele.frequency * 100),
+      Variant_Display = format_variant_display(
+        protein_change, variant_class, chr, pos, ref, alt
+      ),
+      Type_Display = format_type_display(variant_class, variant_type),
+      ClinVar = if (has_clinvar) {
+        ifelse(is.na(clinical_significance) | clinical_significance == "",
+               "Not queried", clinical_significance)
+      } else {
+        "Not queried"
+      }
+    ) %>%
+    ungroup() %>%
+    select(Gene = gene,
+           Variant = Variant_Display,
+           `VAF (SSCS)` = VAF_pct,
+           Type = Type_Display,
+           `ClinVar Classification` = ClinVar) %>%
+    distinct()
+
+  kable(low_table, format = "html", booktabs = TRUE,
+        caption = "Mutations with VAF < 1% (Emerging/Monitoring)",
+        longtable = TRUE) %>%
+    kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"))
+} else {
+  cat("\n\n*No mutations detected below 1% VAF after quality filtering.*\n\n")
+}
+```
+
+```{r low-vaf-summary, results='asis'}
+if (n_low > 0) {
+  cat("\n\n## Clinical Considerations for Low-VAF Mutations\n\n")
+
+  low_genes <- unique(params$mutations_low$gene)
+
+  for (gene in low_genes) {
+    gene_info <- get_gene_info(gene)
+    if (!is.null(gene_info)) {
+      cat(sprintf("\n\n### %s\n\n", gene))
+      cat(sprintf("**Risk if Clone Expands:** %s\n\n", gene_info$risk_category))
+      cat(sprintf("**Potential Clinical Implications:** %s\n\n", gene_info$clinical_significance))
+      cat("**Recommendation:** Monitor with periodic sequencing (6-12 months) to assess clonal dynamics.\n\n")
+    }
+  }
+}
+```
+
+---
+
+# Gene Summary
+
+```{r gene-summary-table, results='asis'}
+if (n_total > 0) {
+  # Combine all mutations
+  all_mutations <- bind_rows(
+    if (n_high > 0) mutate(params$mutations_high, category = ">=1% VAF") else NULL,
+    if (n_low > 0) mutate(params$mutations_low, category = "<1% VAF") else NULL
+  )
+
+  gene_summary <- all_mutations %>%
+    group_by(gene) %>%
+    summarise(
+      `# Mutations` = n(),
+      `Max VAF` = sprintf("%.2f%%", max(SSCS.allele.frequency) * 100),
+      `Variant Types` = paste(unique(na.omit(variant_class)), collapse = ", "),
+      Categories = paste(unique(category), collapse = ", "),
+      .groups = "drop"
+    ) %>%
+    mutate(
+      `Risk Level` = sapply(gene, get_gene_risk)
+    ) %>%
+    arrange(desc(`# Mutations`))
+
+  kable(gene_summary, format = "html", booktabs = TRUE,
+        caption = "Summary by Gene") %>%
+    kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"))
+}
+```
+
+---
+
+# Technical Information
+
+## Quality Filtering Applied
+
+The following quality filters were applied before reporting:
+
+| Filter | Criterion |
+|:-------|:----------|
+| Flag Filter | Variants with quality flags removed |
+| P-value Threshold | P-value < 0.05 |
+| VAF Detection | SSCS allele frequency used for accurate quantification |
+| Replicate Merging | Technical replicates (A/B) merged by sample |
+| Deduplication | Multiple hits of same mutation type per gene consolidated |
+
+## Variant Type Classification
+
+Variant types are determined as follows:
+
+| Alt Allele | Classification |
+|:-----------|:---------------|
+| + | Insertion (frameshift) |
+| - | Deletion (frameshift) |
+| Single base | SNV (missense/nonsense based on effect) |
+| Length change | Insertion or Deletion based on size comparison |
+
+## VAF Thresholds and Interpretation
+
+| VAF Range | Interpretation | Clinical Relevance |
+|:----------|:---------------|:-------------------|
+| >= 2% | WHO-defined CHIP | Established clonal hematopoiesis |
+| 1-2% | Significant clone | Above typical sequencing noise, clinically notable |
+| 0.1-1% | Emerging clone | At detection limit, requires monitoring |
+| < 0.1% | Below reliable detection | Not reported |
+
+## Assay Information
+
+- **Technology:** Single-molecule Molecular Inversion Probes (smMIPs)
+- **Analysis Pipeline:** smMIPTools
+- **Sequencing Metric:** Single-Strand Consensus Sequence (SSCS) for error correction
+- **Panel:** Myeloid/CHIP gene panel
+
+## ClinVar Annotation
+
+- Variants are annotated using NCBI ClinVar database
+- Known CHIP hotspot mutations (e.g., JAK2 V617F, DNMT3A R882H) are pre-annotated from curated database
+- "Not found in ClinVar" indicates the specific variant has not been submitted to ClinVar
+
+## Limitations
+
+1. This analysis is limited to the genes included in the targeted panel
+2. Large structural variants, copy number alterations, and some insertions/deletions may not be detected
+3. Variants below the analytical sensitivity (~0.1% VAF) are not reported
+4. ClinVar classifications reflect current database entries and may change over time
+5. Clinical interpretation should be performed by qualified healthcare professionals
+
+---
+
+# References and Resources
+
+## Key CHIP Literature
+
+1. Jaiswal S, et al. Age-related clonal hematopoiesis associated with adverse outcomes. *N Engl J Med*. 2014;371:2488-2498.
+
+2. Genovese G, et al. Clonal hematopoiesis and blood-cancer risk inferred from blood DNA sequence. *N Engl J Med*. 2014;371:2477-2487.
+
+3. Steensma DP, et al. Clonal hematopoiesis of indeterminate potential and its distinction from myelodysplastic syndromes. *Blood*. 2015;126:9-16.
+
+4. Jaiswal S, et al. Clonal hematopoiesis and risk of atherosclerotic cardiovascular disease. *N Engl J Med*. 2017;377:111-121.
+
+5. Coombs CC, et al. Therapy-related clonal hematopoiesis in patients with non-hematologic cancers is common and associated with adverse clinical outcomes. *Cell Stem Cell*. 2017;21:374-382.
+
+## Online Resources
+
+- **ClinVar:** https://www.ncbi.nlm.nih.gov/clinvar/
+- **COSMIC:** https://cancer.sanger.ac.uk/cosmic
+- **gnomAD:** https://gnomad.broadinstitute.org/
+
+---
+
+*This report was generated automatically using the CHIP Analysis Pipeline (Updated). Clinical decisions should be made in consultation with qualified healthcare professionals and in the context of the patient's complete clinical picture.*
+
+**Report Generated:** `r format(Sys.time(), '%Y-%m-%d %H:%M:%S')`

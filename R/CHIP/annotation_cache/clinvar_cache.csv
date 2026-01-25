@@ -1,0 +1,2 @@
+"query_key","gene","protein_change","chr","pos","ref","alt","clinvar_id","clinical_significance","review_status","conditions","last_updated"
+"JAK2_chr9_5073770_G_T","JAK2","G1402T","chr9",5073770,"G","T","4622382","Uncertain significance",NA,NA,"2026-01-25"
