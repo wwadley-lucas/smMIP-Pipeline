@@ -19,12 +19,12 @@ PANEL="${UNIVERSAL_DIR}/Myeloid_Panel_Targets.chr.txt"
 REF="${UNIVERSAL_DIR}/hg19/hg19.fa"
 ANNOTATED_PANEL="${UNIVERSAL_DIR}/annotated_Myeloid_Panel_Targets.txt"
 CONFIG=""
-THREADS=6
+THREADS=2
 PARALLEL_JOBS=4
 USE_PARALLEL=false
 FORCE=false
 START_STAGE=1
-STOP_STAGE=6
+STOP_STAGE=8
 
 # R script directory
 CODE_DIR="${UNIVERSAL_DIR}/Code/R"
