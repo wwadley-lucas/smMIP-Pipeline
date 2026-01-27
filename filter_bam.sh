@@ -14,7 +14,6 @@ Usage:
 
 Filters BAM files:
   - Minimum mapping quality (default: 50)
-  - Properly paired reads only (-f 2)
 
 EOF
 }
@@ -45,7 +44,7 @@ shopt -s nullglob
 BAM_LIST=( "${BAM_DIR}"/*.bam )
 [[ ${#BAM_LIST[@]} -gt 0 ]] || { echo "No .bam files found in ${BAM_DIR}"; exit 1; }
 
-say "Filtering ${#BAM_LIST[@]} BAM file(s) with MAPQ >= ${MIN_MAPQ} and properly paired (-f 2)"
+say "Filtering ${#BAM_LIST[@]} BAM file(s) with MAPQ >= ${MIN_MAPQ}"
 
 for BAM in "${BAM_LIST[@]}"; do
   SAMPLE="$(basename "${BAM}" .bam)"
@@ -53,7 +52,7 @@ for BAM in "${BAM_LIST[@]}"; do
 
   say "Filtering ${SAMPLE}..."
 
-  samtools view -b -q "${MIN_MAPQ}" -f 2 -@ "${THREADS}" "${BAM}" -o "${OUT_BAM}"
+  samtools view -b -q "${MIN_MAPQ}" -@ "${THREADS}" "${BAM}" -o "${OUT_BAM}"
   samtools index -@ "${THREADS}" "${OUT_BAM}"
 
   # Stats

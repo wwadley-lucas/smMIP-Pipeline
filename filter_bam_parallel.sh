@@ -28,7 +28,6 @@ Options:
 
 Filters BAM files:
   - Minimum mapping quality (default: 50)
-  - Properly paired reads only (-f 2)
 
 Resource allocation (default 4 parallel):
   - 6 threads/sample × 4 samples = 24 cores
@@ -76,7 +75,7 @@ filter_one_sample() {
 
   echo "[$(date '+%Y-%m-%d %H:%M:%S')] Filtering ${SAMPLE}..." | tee "${LOG}"
 
-  samtools view -b -q "${_MIN_MAPQ}" -f 2 -@ "${_THREADS}" "${BAM}" -o "${OUT_BAM}" 2>> "${LOG}"
+  samtools view -b -q "${_MIN_MAPQ}" -@ "${_THREADS}" "${BAM}" -o "${OUT_BAM}" 2>> "${LOG}"
   samtools index -@ "${_THREADS}" "${OUT_BAM}" 2>> "${LOG}"
 
   # Stats
@@ -95,7 +94,7 @@ BAM_LIST=( "${BAM_DIR}"/*.bam )
 
 say "Found ${#BAM_LIST[@]} BAM files to filter"
 say "Running ${PARALLEL_JOBS} samples in parallel with ${THREADS_PER_SAMPLE} threads each"
-say "Filtering with MAPQ >= ${MIN_MAPQ} and properly paired (-f 2)"
+say "Filtering with MAPQ >= ${MIN_MAPQ}"
 
 # Export variables for parallel subshells
 export _OUT_DIR="${OUT_DIR}"
