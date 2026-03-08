@@ -81,7 +81,7 @@ filter_one_sample() {
   # Stats
   BEFORE=$(samtools view -c "${BAM}")
   AFTER=$(samtools view -c "${OUT_BAM}")
-  PCT=$(awk -v after="$AFTER" -v before="$BEFORE" 'BEGIN {printf "%.1f", (after/before)*100}')
+  PCT=$(awk -v after="$AFTER" -v before="$BEFORE" 'BEGIN {if (before > 0) printf "%.1f", (after/before)*100; else printf "0.0"}')
 
   echo "[$(date '+%Y-%m-%d %H:%M:%S')] ${SAMPLE}: ${BEFORE} -> ${AFTER} reads (${PCT}% retained)" | tee -a "${LOG}"
 }

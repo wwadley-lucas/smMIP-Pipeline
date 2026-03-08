@@ -445,6 +445,18 @@ generate_single_report <- function(sample_id, filtered_data = NULL,
     }
 
     # Stratify by VAF threshold (1% SSCS = 0.01)
+    #
+    # SSCS VAF fallback behavior:
+    # SSCS.allele.frequency is the Single-Strand Consensus Sequence VAF, which
+    # is more accurate than raw allele.frequency because it collapses PCR
+    # duplicates using UMI families. When SSCS data is unavailable (e.g., panels
+    # without UMIs, or low-coverage loci where no UMI families form), the
+    # upstream pipeline (smMIPs_Functions.R) sets SSCS.allele.frequency to 0 or
+    # NaN. In that case, variants will be classified as "Emerging (VAF < 1%)"
+    # regardless of their raw VAF. Users should cross-reference
+    # allele.frequency (raw) for any variants where SSCS.allele.frequency is 0
+    # but a real variant is suspected. Consider using allele.frequency as a
+    # fallback when SSCS.allele.frequency is 0/NaN and allele.frequency > 0.
     mutations_high <- sample_mutations %>%
       filter(SSCS.allele.frequency >= 0.01)
 

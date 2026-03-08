@@ -516,8 +516,8 @@ adjust_readname<-function(d){
   }
 
   # generate umi usage summary
-  if(!((length(unique(data$panel$length.left.umi))==1 & 0 %in% unique(data$panel$length.left.umi)) &
-       (length(unique(data$panel$length.right.umi))==1 & 0 %in% unique(data$panel$length.right.umi)))){
+  if(!((length(unique(d$panel$length.left.umi))==1 & 0 %in% unique(d$panel$length.left.umi)) &
+       (length(unique(d$panel$length.right.umi))==1 & 0 %in% unique(d$panel$length.right.umi)))){
     suffix<-paste(smmips.1,umi.12,sep=":")
     if(length(grep("flag",suffix))>0){
       count=as.data.frame(matrix(unlist(strsplit(suffix[-grep("flag",suffix)],split = ":")), ncol = 2, byrow = TRUE))
@@ -1487,11 +1487,11 @@ additional.flags = function(d){
     idx1=idx1[!(idx1 %in% idx2)]
 
     if(length(idx3)>0){
-      if(length(which(!is.na(data$samples$replicate)))>0){ #experiment with replicates
+      if(length(which(!is.na(d$samples$replicate)))>0){ #experiment with replicates
         a="No SSCS support in one of the replicates, "
       } else (a="No SSCS support at all, ")
     } else if (length(idx1)>0) {
-      if(length(which(!is.na(data$samples$replicate)))>0){ #experiment with replicates
+      if(length(which(!is.na(d$samples$replicate)))>0){ #experiment with replicates
         a="No SSCS support in either Read1 or Read2 in at least one of the replicates, "
       } else {
         a="No SSCS support in either Read1 or Read2, "
@@ -1539,7 +1539,7 @@ additional.flags = function(d){
   }
 
   idx1=which((d$calls$alt=="+" | d$calls$alt=="-") & (d$calls$variant_type=="intron_variant" | d$calls$variant_type=="splice_region_variant"))
-  if(length(idx1>0)){
+  if(length(idx1) > 0){
     d$calls[idx1, flags:=paste0(flags,"Intronic indel, ")]
   }
 

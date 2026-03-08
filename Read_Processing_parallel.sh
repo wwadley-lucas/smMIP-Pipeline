@@ -16,7 +16,7 @@ R_SCRIPT="${CODE_DIR}/map_smMIPs_extract_UMIs.R"
 
 THREADS_PER_SAMPLE=2
 PARALLEL_JOBS=4
-OVERLAP=0.65
+OVERLAP=0.95
 MAPQ=0
 FORCE_REDO="${FORCE_REDO:-0}"
 
@@ -104,7 +104,16 @@ process_one_sample() {
   local base sample log status
 
   base="$(basename "$bam")"
-  sample="${base%%-*}"
+  # Strip known BAM suffixes to derive sample name.
+  # Handles names with hyphens (e.g., "KG-001" won't be truncated).
+  # Try removing ".filtered.bam" first, then ".coorSorted.bam", then ".bam".
+  sample="${base%.filtered.bam}"
+  if [[ "$sample" == "$base" ]]; then
+    sample="${base%.coorSorted.bam}"
+  fi
+  if [[ "$sample" == "$base" ]]; then
+    sample="${base%.bam}"
+  fi
 
   if [[ -z "$sample" || "$sample" == "$base" ]]; then
     echo "WARNING: Could not derive sample from: $base" >&2

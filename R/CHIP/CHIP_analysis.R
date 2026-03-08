@@ -17,7 +17,9 @@ option_list <- list(
   make_option(c("-v", "--vaf_threshold"), type = "numeric", default = 0.01,
               help = "VAF threshold for filtering [default: 0.01]", metavar = "NUM"),
   make_option(c("-p", "--pval_threshold"), type = "numeric", default = 0.05,
-              help = "P-value threshold for filtering [default: 0.05]", metavar = "NUM")
+              help = "P-value threshold for filtering [default: 0.05]", metavar = "NUM"),
+  make_option(c("-d", "--min_depth"), type = "integer", default = 0,
+              help = "Minimum read depth to retain a variant. Variants below this threshold are flagged as LOW_DEPTH [default: 0 (disabled)]", metavar = "INT")
 )
 
 opt_parser <- OptionParser(option_list = option_list,
@@ -42,7 +44,8 @@ cat("CHIP Analysis Parameters:\n")
 cat("  Input file:", opt$input, "\n")
 cat("  Output directory:", opt$output, "\n")
 cat("  VAF threshold:", opt$vaf_threshold, "\n")
-cat("  P-value threshold:", opt$pval_threshold, "\n\n")
+cat("  P-value threshold:", opt$pval_threshold, "\n")
+cat("  Min depth filter:", ifelse(opt$min_depth > 0, opt$min_depth, "disabled"), "\n\n")
 
 # ============================================================================
 # SETUP AND DEPENDENCIES
@@ -93,6 +96,23 @@ filtered_data <- data %>%
   )
 
 cat("After filtering:", nrow(filtered_data), "rows\n")
+
+# Flag variants below minimum depth threshold (if enabled)
+if (opt$min_depth > 0 && "coverage" %in% names(filtered_data)) {
+  low_depth_idx <- which(filtered_data$coverage < opt$min_depth)
+  if (length(low_depth_idx) > 0) {
+    filtered_data$flag_status[low_depth_idx] <- paste0(filtered_data$flag_status[low_depth_idx], ";LOW_DEPTH")
+    cat("Flagged", length(low_depth_idx), "variants with depth <", opt$min_depth, "as LOW_DEPTH\n")
+  }
+} else if (opt$min_depth > 0 && "total.coverage" %in% names(filtered_data)) {
+  low_depth_idx <- which(filtered_data$total.coverage < opt$min_depth)
+  if (length(low_depth_idx) > 0) {
+    filtered_data$flag_status[low_depth_idx] <- paste0(filtered_data$flag_status[low_depth_idx], ";LOW_DEPTH")
+    cat("Flagged", length(low_depth_idx), "variants with depth <", opt$min_depth, "as LOW_DEPTH\n")
+  }
+} else if (opt$min_depth > 0) {
+  cat("WARNING: --min_depth specified but no coverage/total.coverage column found; skipping depth filter\n")
+}
 
 # Check if any mutations passed filtering
 if (nrow(filtered_data) == 0) {

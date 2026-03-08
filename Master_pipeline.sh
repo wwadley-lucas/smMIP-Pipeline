@@ -336,6 +336,24 @@ if [[ "$STOP_STAGE" -ge 7 ]]; then
 fi
 say "============================================="
 
+# ----------- Software Version Logging -----------
+say ""
+say "--- Software Versions ---"
+say "R:        $(Rscript --version 2>&1 | head -1 || echo 'not found')"
+say "samtools: $(samtools --version 2>/dev/null | head -1 || echo 'not found')"
+say "bwa:      $(bwa 2>&1 | grep -m1 'Version' || echo 'not found')"
+# Log key R package versions used by the pipeline
+Rscript --no-restore --no-save -e '
+  pkgs <- c("Rsamtools", "data.table", "optparse", "Biostrings", "parallel",
+            "tidyverse", "ComplexHeatmap", "circlize")
+  for (p in pkgs) {
+    v <- tryCatch(as.character(packageVersion(p)), error = function(e) "not installed")
+    cat(sprintf("  %-20s %s\n", p, v))
+  }
+' 2>/dev/null || warn "Could not determine R package versions"
+say "--- End Software Versions ---"
+say ""
+
 # =============================================================================
 # STAGE 1: BWA Alignment
 # =============================================================================
