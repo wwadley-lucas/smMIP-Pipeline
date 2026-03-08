@@ -69,14 +69,23 @@ data <- read.delim(opt$input, stringsAsFactors = FALSE,
 cat("Original data dimensions:", nrow(data), "rows x", ncol(data), "columns\n")
 
 # Apply filtering criteria:
-# 1. Remove rows with any flags (non-empty flags column)
+# 1. Flag mutations with quality flags (retained for review, not removed)
 # 2. Allele frequency > VAF threshold (from command line)
 # 3. P-value < P-value threshold (from command line)
+#
+# NOTE: Flagged mutations are kept but marked in 'flag_status' column.
+# Removing all flagged mutations risks discarding true positives
+# (e.g., variants near homopolymers that are real but flagged by
+# conservative quality filters). Downstream analysis should filter
+# on flag_status as appropriate for the specific use case.
+
+data$flag_status <- ifelse(
+  is.na(data$flags) | trimws(data$flags) == "",
+  "PASS", "FLAGGED"
+)
 
 filtered_data <- data %>%
   filter(
-    # Remove rows with flags (empty string, NA, or whitespace only)
-    is.na(flags) | trimws(flags) == "",
     # Allele frequency > threshold
     allele.frequency > opt$vaf_threshold,
     # P-value < threshold
