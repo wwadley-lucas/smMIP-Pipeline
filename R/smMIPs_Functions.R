@@ -291,40 +291,9 @@ verify_mapping<-function(key,smmip,r1,r2,panel,isize){
 }
 
 
-#Main smMIP-read mapping function.
-map.smips<-function(d){
-  d$samtable<-d$samtable[order(d$samtable$qname,d$samtable$flag),]   ## this order the file to allow every read to be pulled out as R1 or R2
-
-  R1<-d$samtable[seq(1,dim(d$samtable)[1],2),]
-  R2<-d$samtable[seq(2,dim(d$samtable)[1],2),]
-  dnames=names(d$samtable)
-  d$samtable = NULL
-
-  # Validate R1/R2 pairing: read names must match between odd/even rows
-  r1_names <- sub("/[12]$", "", as.character(R1$qname))
-  r2_names <- sub("/[12]$", "", as.character(R2$qname))
-  if (!all(r1_names == r2_names)) {
-    n_mismatch <- sum(r1_names != r2_names)
-    warning(paste0("R1/R2 read name mismatch detected - ", n_mismatch,
-                   " pairs may be incorrectly paired. ",
-                   "Alternating row pairing assumes sorted, complete pairs."))
-  }
-
-  # determine the unique read "family/key". This is used for mapping back the assigned smmips in the list of sites back to the file records
-  R1$lpos<-apply(R1[,c("pos","mpos")],1,min)
-  R1$rpos<-R1$lpos+abs(R1$isize)-1
-  R1$mpos<-apply(R1[,c("pos","mpos")],1,max)
-  R1$ukey<-paste0(as.character(R1$rname),":",as.character(R1$lpos),":",as.character(R1$rpos),":",as.character(R1$isize),":",as.character(R1$mpos),":",as.character(R1$cigar),":",as.character(R2$cigar))
-
-  # for each unique "family/key" detemine what will be the smmip of which the "family/key" overap the most
-  # get a list of unique sites, and map candidate smmips to each.
-  # Candidates are limited the two smmips with the highest scores bases on overlap the calculated distances ("map.smip_to_site").
-  s=as.data.frame(table(R1$ukey))
-  sites<-as.data.frame(unique(R1[,c("rname","lpos","rpos","isize","mpos","ukey")]))
-  sites$potential_smMIPs<-sites$cut2<-sites$cut1<-sites$readsR1<-NA
-  sites$readsR1[match(s$Var1,sites$ukey)]=s$Freq
-
-  # determine the best candidates for each unique "family/key"
+# CLR-012: Extracted from map.smips() — find candidate smMIP matches for each unique site
+# Uses mclapply with error recovery to map candidates via overlap/distance (map.smip_to_site)
+find_smip_candidates <- function(sites, panel) {
   m = list(mclapply(1:nrow(sites) ,mc.cores = opt$threads, mc.cleanup=T, mc.silent=F ,function(i){#
     if(round(i/nrow(sites),1) %in% seq(0.1,0.9,0.1)) {
       system(paste0("printf '\\rMapping smMIPs to reads. Considering overlap and distance measurements :  ",round(100*i/nrow(sites)),"%%      '"))    }
@@ -332,7 +301,7 @@ map.smips<-function(d){
       system(paste0("printf '\\rMapping smMIPs to reads. Considering overlap and distance measurements :  100%%'"))
     }
     x<-sites[,c("rname","lpos","rpos")][i,]
-    map.smip_to_site(as.character(unlist(x[1])),as.integer(x[2]),as.integer(x[3]),d$panel)[[1]]
+    map.smip_to_site(as.character(unlist(x[1])),as.integer(x[2]),as.integer(x[3]),panel)[[1]]
   }))
 
   err.idx=which(unlist(lapply(1:length(m[[1]]), function(i) is.null(m[[1]][[i]]))=="TRUE"))
@@ -356,7 +325,7 @@ map.smips<-function(d){
           system(paste0("printf '\\rTrying to fill the missing data :  "," Attempt number ",attempt,"     '"))
         }
 	x<-sites[,c("rname","lpos","rpos")][i,]
-     map.smip_to_site(as.character(unlist(x[1])),as.integer(x[2]),as.integer(x[3]),d$panel)[[1]]
+     map.smip_to_site(as.character(unlist(x[1])),as.integer(x[2]),as.integer(x[3]),panel)[[1]]
     }))
     m[[1]][err.idx]=m.fill[[1]]
     err.idx=which(unlist(lapply(1:length(m[[1]]), function(i) is.null(m[[1]][[i]]))=="TRUE"))
@@ -368,9 +337,13 @@ map.smips<-function(d){
      cat("Sorry, could not fill in all the missing data. One or more cores still did not deliver a result\n")
      quit()
   }
-  sites[,"potential_smMIPs"]=m
 
-  # verification based on actual arms alignment
+  m
+}
+
+# CLR-012: Extracted from map.smips() — verify candidates via arm alignment, tiebreak, and assign
+# Modifies sites in place (data.frame columns smMIP, cut1, cut2) and returns the verification results
+verify_and_assign <- function(sites, R1, R2, panel) {
   idx<-which(!is.na(sites$potential_smMIPs))
 
   m <-mclapply(idx ,mc.cores = opt$threads, mc.cleanup=T, mc.silent=F ,function(i){
@@ -380,7 +353,7 @@ map.smips<-function(d){
     if(i %in% idx[(length(idx)-opt$threads):length(idx)]) {
       system(paste0("printf '\\rVerifying mapping by local smMIP arms alignment : 100%%'"))
     }
-    verify_mapping(sites[i,]$ukey,sites[i,]$potential_smMIPs,R1,R2,d$panel,sites[i,]$isize)
+    verify_mapping(sites[i,]$ukey,sites[i,]$potential_smMIPs,R1,R2,panel,sites[i,]$isize)
   })
 
   err.idx=which(unlist(lapply(1:length(m), function(i) is.null(m[[i]]))=="TRUE"))
@@ -403,7 +376,7 @@ map.smips<-function(d){
         if(round(i/length(err.idx),1) %in% seq(0,0.9,0.1)) {
           system(paste0("printf '\\rTrying to fill the missing data :  "," Attempt number ",attempt,"     '"))
         }
-        verify_mapping(sites[idx[i],]$ukey,sites[idx[i],]$potential_smMIPs,R1,R2,d$panel,sites[idx[i],]$isize)
+        verify_mapping(sites[idx[i],]$ukey,sites[idx[i],]$potential_smMIPs,R1,R2,panel,sites[idx[i],]$isize)
     }))
     m[err.idx]=m.fill[[1]]
     err.idx=which(unlist(lapply(1:length(m), function(i) is.null(m[[i]]))=="TRUE"))
@@ -439,6 +412,49 @@ map.smips<-function(d){
     sites$cut1[idx[idx2]]=gsub(",.*","",sites$cut1[idx[idx2]])
     sites$cut2[idx[idx2]]=gsub(",.*","",sites$cut2[idx[idx2]])
   }
+
+  sites
+}
+
+#Main smMIP-read mapping function.
+# CLR-012: Decomposed into find_smip_candidates() and verify_and_assign()
+map.smips<-function(d){
+  d$samtable<-d$samtable[order(d$samtable$qname,d$samtable$flag),]   ## this order the file to allow every read to be pulled out as R1 or R2
+
+  R1<-d$samtable[seq(1,dim(d$samtable)[1],2),]
+  R2<-d$samtable[seq(2,dim(d$samtable)[1],2),]
+  dnames=names(d$samtable)
+  d$samtable = NULL
+
+  # Validate R1/R2 pairing: read names must match between odd/even rows
+  r1_names <- sub("/[12]$", "", as.character(R1$qname))
+  r2_names <- sub("/[12]$", "", as.character(R2$qname))
+  if (!all(r1_names == r2_names)) {
+    n_mismatch <- sum(r1_names != r2_names)
+    warning(paste0("R1/R2 read name mismatch detected - ", n_mismatch,
+                   " pairs may be incorrectly paired. ",
+                   "Alternating row pairing assumes sorted, complete pairs."))
+  }
+
+  # determine the unique read "family/key". This is used for mapping back the assigned smmips in the list of sites back to the file records
+  R1$lpos<-apply(R1[,c("pos","mpos")],1,min)
+  R1$rpos<-R1$lpos+abs(R1$isize)-1
+  R1$mpos<-apply(R1[,c("pos","mpos")],1,max)
+  R1$ukey<-paste0(as.character(R1$rname),":",as.character(R1$lpos),":",as.character(R1$rpos),":",as.character(R1$isize),":",as.character(R1$mpos),":",as.character(R1$cigar),":",as.character(R2$cigar))
+
+  # for each unique "family/key" detemine what will be the smmip of which the "family/key" overap the most
+  # get a list of unique sites, and map candidate smmips to each.
+  # Candidates are limited the two smmips with the highest scores bases on overlap the calculated distances ("map.smip_to_site").
+  s=as.data.frame(table(R1$ukey))
+  sites<-as.data.frame(unique(R1[,c("rname","lpos","rpos","isize","mpos","ukey")]))
+  sites$potential_smMIPs<-sites$cut2<-sites$cut1<-sites$readsR1<-NA
+  sites$readsR1[match(s$Var1,sites$ukey)]=s$Freq
+
+  # determine the best candidates for each unique "family/key"
+  sites[,"potential_smMIPs"] = find_smip_candidates(sites, d$panel)
+
+  # verification based on actual arms alignment, tiebreaking, and assignment
+  sites <- verify_and_assign(sites, R1, R2, d$panel)
 
   #assign the smmips names back to all read1 and read2, as well as the determined arm start points to decide whether to pass or flag the UMI sequences
   rownames(sites)<-sites$ukey
@@ -951,6 +967,58 @@ prior.knowledge = function(d){
   d
 }
 
+# CLR-012: Extracted from pval.calculation() — estimate background error rates for one sample
+# Returns list(v.plus, v.minus) — the error rate vectors for plus and minus strands
+# Modifies d$control.non.ref.counts.plus/minus in place (pseudocount application via data.table :=)
+estimate_error_rates <- function(d, control.names) {
+  if(opt$binomial=="sum"){
+    # MTH-002: Pseudocount of 1 for error rate estimation
+    # When zero non-reference reads are observed in controls, a pseudocount of 1 is added
+    # to avoid a zero error rate estimate (which would make any variant infinitely significant).
+    # This is a Laplace-style smoothing: it provides a conservative floor on the background
+    # error rate, roughly equivalent to observing 1 error read across all control coverage.
+    # The resulting error rate = (sum_alt_counts + pseudocounts) / sum_total_depth.
+    #plus
+    d$control.non.ref.counts.plus[d$control.non.ref.counts.plus==0]=1
+    ap=d$control.non.ref.counts.plus[,rowSums(.SD, na.rm=T),.SDcols=control.names]
+    bp=d$total.depth.plus[,rowSums(.SD, na.rm=T),.SDcols=control.names]
+    v.plus=ap/bp
+
+    #minus
+    d$control.non.ref.counts.minus[d$control.non.ref.counts.minus==0]=1
+    am=d$control.non.ref.counts.minus[,rowSums(.SD, na.rm=T),.SDcols=control.names]
+    bm=d$total.depth.minus[,rowSums(.SD, na.rm=T),.SDcols=control.names]
+    v.minus=am/bm
+  } else if (opt$binomial=="max"){
+    #plus
+    d$control.non.ref.counts.plus[d$control.non.ref.counts.plus==0]=1
+    d$control.allele.frequency.plus=d$control.non.ref.counts.plus/d$control.total.depth.plus
+    v.plus=d$control.allele.frequency.plus[, do.call(pmax, c(.SD,list(na.rm = TRUE))), .SDcols = control.names]
+
+    #minus
+    d$control.non.ref.counts.minus[d$control.non.ref.counts.minus==0]=1
+    d$control.allele.frequency.minus=d$control.non.ref.counts.minus/d$control.total.depth.minus
+    v.minus=d$control.allele.frequency.minus[, do.call(pmax, c(.SD,list(na.rm = TRUE))), .SDcols = control.names]
+  }
+
+  list(v.plus=v.plus, v.minus=v.minus)
+}
+
+# CLR-012: Extracted from pval.calculation() — compute binomial p-values for one sample
+# Returns list(pval.plus, pval.minus)
+compute_pvalues <- function(d, n, error_rates) {
+  pval.plus=suppressWarnings(pbinom(d$non.ref.counts.plus[[n]], size=d$total.depth.plus[[n]], prob=error_rates$v.plus,lower.tail = F))
+  idx1=which(d$non.ref.counts.plus[[n]]==0) # the p-value will be changed to 1 when there are no supporting reads
+  pval.plus[idx1]=1
+
+  pval.minus=suppressWarnings(pbinom(d$non.ref.counts.minus[[n]], size=d$total.depth.minus[[n]], prob=error_rates$v.minus,lower.tail = F))
+  idx1=which(d$non.ref.counts.minus[[n]]==0) # pval change to 1 when there are no supporting reads
+  pval.minus[idx1]=1
+
+  list(pval.plus=pval.plus, pval.minus=pval.minus)
+}
+
+# CLR-012: Decomposed into estimate_error_rates() and compute_pvalues()
 pval.calculation = function(d){
   d <- copy(d)  # prevent modification of caller's data.table via reference semantics (:=)
   control.names=d$control.names
@@ -973,50 +1041,10 @@ pval.calculation = function(d){
       control.names=d$samples$id[d$samples$type=="control"]
     }
 
-    d$pval.plus[[n]]=NA
-    d$pval.minus[[n]]=NA
-
-    if(opt$binomial=="sum"){
-      # MTH-002: Pseudocount of 1 for error rate estimation
-      # When zero non-reference reads are observed in controls, a pseudocount of 1 is added
-      # to avoid a zero error rate estimate (which would make any variant infinitely significant).
-      # This is a Laplace-style smoothing: it provides a conservative floor on the background
-      # error rate, roughly equivalent to observing 1 error read across all control coverage.
-      # The resulting error rate = (sum_alt_counts + pseudocounts) / sum_total_depth.
-      #plus
-      d$control.non.ref.counts.plus[d$control.non.ref.counts.plus==0]=1
-      ap=d$control.non.ref.counts.plus[,rowSums(.SD, na.rm=T),.SDcols=control.names]
-      bp=d$total.depth.plus[,rowSums(.SD, na.rm=T),.SDcols=control.names]
-      v=ap/bp
-      d$pval.plus[[n]]=suppressWarnings(pbinom(d$non.ref.counts.plus[[n]], size=d$total.depth.plus[[n]], prob=v,lower.tail = F))
-      idx1=which(d$non.ref.counts.plus[[n]]==0) # the p-value will be changed to 1 when there are no supporting reads
-      d$pval.plus[[n]][idx1]=1
-
-      #minus
-      d$control.non.ref.counts.minus[d$control.non.ref.counts.minus==0]=1
-      am=d$control.non.ref.counts.minus[,rowSums(.SD, na.rm=T),.SDcols=control.names]
-      bm=d$total.depth.minus[,rowSums(.SD, na.rm=T),.SDcols=control.names]
-      v=am/bm
-      d$pval.minus[[n]]=suppressWarnings(pbinom(d$non.ref.counts.minus[[n]], size=d$total.depth.minus[[n]], prob=v,lower.tail = F))
-      idx1=which(d$non.ref.counts.minus[[n]]==0) # pval change to 1 when there are no supporting reads
-      d$pval.minus[[n]][idx1]=1
-    } else if (opt$binomial=="max"){
-      #plus
-      d$control.non.ref.counts.plus[d$control.non.ref.counts.plus==0]=1
-      d$control.allele.frequency.plus=d$control.non.ref.counts.plus/d$control.total.depth.plus
-      v=d$control.allele.frequency.plus[, do.call(pmax, c(.SD,list(na.rm = TRUE))), .SDcols = control.names]
-      d$pval.plus[[n]]=suppressWarnings(pbinom(d$non.ref.counts.plus[[n]], size=d$total.depth.plus[[n]], prob=v,lower.tail = F))
-      idx1=which(d$non.ref.counts.plus[[n]]==0) # the p-value will be changed to 1 when there are no supporting reads
-      d$pval.plus[[n]][idx1]=1
-
-      #minus
-      d$control.non.ref.counts.minus[d$control.non.ref.counts.minus==0]=1
-      d$control.allele.frequency.minus=d$control.non.ref.counts.minus/d$control.total.depth.minus
-      v=d$control.allele.frequency.minus[, do.call(pmax, c(.SD,list(na.rm = TRUE))), .SDcols = control.names]
-      d$pval.minus[[n]]=suppressWarnings(pbinom(d$non.ref.counts.minus[[n]], size=d$total.depth.minus[[n]], prob=v,lower.tail = F))
-      idx1=which(d$non.ref.counts.minus[[n]]==0) # pval change to 1 when there are no supporting reads
-      d$pval.minus[[n]][idx1]=1
-    }
+    error_rates <- estimate_error_rates(d, control.names)
+    pvals <- compute_pvalues(d, n, error_rates)
+    d$pval.plus[[n]] <- pvals$pval.plus
+    d$pval.minus[[n]] <- pvals$pval.minus
 
     x=x+1
     if(round(x/nrow(d$samples[type=="case"]),2) %in% seq(0.01,0.99,0.01)){
@@ -1477,7 +1505,9 @@ adding.batch.info2 <- function(d){
   d
 }
 
-additional.flags = function(d){
+# CLR-012: Extracted from additional.flags() — flag benign variants, common SNPs, and potential germline
+# Modifies d$calls$flags in place via data.table reference semantics (:=)
+flag_benign_and_germline <- function(d) {
   idx1=grep("synonymous_variant|intron_variant|splice_region_variant|non_coding_transcript_exon_variant|5_prime_UTR_variant|3_prime_UTR_variant",d$calls$variant_type)
   idx2=grep("A|G|C|T",d$calls$alt)
   if(length(idx1)>0){
@@ -1489,7 +1519,12 @@ additional.flags = function(d){
   idx2=which(d$calls$maf>opt$maf & is.na(d$calls$cosmic))
   idx2=idx2[!(idx2 %in% idx1)]
   if(length(idx2)>0){d$calls[idx2, flags:=paste(flags,"Potentially germline based on user's MAF cut-off and lack of COSMIC ID",sep = ", ")]}
+  d
+}
 
+# CLR-012: Extracted from additional.flags() — flag SSCS support status
+# Modifies d$calls$flags and d$calls$SSCS.allele.frequency in place via data.table reference semantics
+flag_sscs_support <- function(d) {
   m=mclapply(1:nrow(d$calls),mc.cores = opt$threads, mc.cleanup=T, mc.silent=F ,function(i){
     x=unlist(strsplit(d$calls$SSCS.family.size[i],":R:"))
     idx1=grep("NA:D|D:NA",x)
@@ -1517,7 +1552,12 @@ additional.flags = function(d){
   d$calls[SSCS.allele.frequency=="NaN",SSCS.allele.frequency:=0]
   idx=intersect(which(d$calls$SSCS.non.ref.counts==0),grep("No SSCS support in one of the replicates",d$calls$flags))
   d$calls[idx, flags:=gsub("No SSCS support in one of the replicates","No SSCS support at all",flags)]
+  d
+}
 
+# CLR-012: Extracted from additional.flags() — flag VAF warnings, intronic indels, and index hopping
+# Modifies d$calls$flags and d$calls$drop in place via data.table reference semantics
+flag_vaf_and_artifacts <- function(d) {
   a=strsplit(d$calls$lower.vaf,split = ",")
   x=unlist(lapply(a,length))
   w=c()
@@ -1570,8 +1610,15 @@ additional.flags = function(d){
   }
 
   d$calls$flags=gsub("NA[,][ ]","", d$calls$flags)
-
   d$calls$flags=gsub("^, Potential index hopping","Potential index hopping", d$calls$flags)
+  d
+}
+
+# CLR-012: Decomposed into flag_benign_and_germline(), flag_sscs_support(), flag_vaf_and_artifacts()
+additional.flags = function(d){
+  d <- flag_benign_and_germline(d)
+  d <- flag_sscs_support(d)
+  d <- flag_vaf_and_artifacts(d)
   d
 }
 
