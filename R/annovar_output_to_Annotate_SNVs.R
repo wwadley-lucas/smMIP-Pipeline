@@ -5,7 +5,7 @@ library("optparse")
 ################ INPUT PARAMETERS
 #define parameters
 option_list = list(
-  make_option(c("-i", "--input.file"), type="character", default=NULL,help="Path to the raw annovar annotated panel file [MENDATORY]", metavar="character"))
+  make_option(c("-i", "--input.file"), type="character", default=NULL,help="Path to the raw annovar annotated panel file [MANDATORY]", metavar="character"))
 
 #takes user input parameters
 opt_parser = OptionParser(option_list=option_list)

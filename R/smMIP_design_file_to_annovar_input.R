@@ -5,7 +5,7 @@ library("optparse")
 ################ INPUT PARAMETERS
 #define parameters
 option_list = list(
-  make_option(c("-p", "--panel.file"), type="character", default=NULL,help="Path to smMIP design file [MENDATORY if -i was not supplied]", metavar="character"),
+  make_option(c("-p", "--panel.file"), type="character", default=NULL,help="Path to smMIP design file [MANDATORY if -i was not supplied]", metavar="character"),
   make_option(c("-c", "--code"), type="character", default=getwd(),help="Path to smMIP tools source functions, smMIPs_Function.R file. If not supplied, it assumes that you are executing this code (smMIP_design_file_to_annovar_input.R) from the same folder where the smMIPs_Functions.R file is" , metavar="character"),
   make_option(c("-o", "--output"), type="character", default=NULL,help="Path for the output new formated file If not supplied, the output will be saved within the folder that contain the smMIP design file/input file", metavar="character"))
 

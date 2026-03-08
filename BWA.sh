@@ -90,7 +90,7 @@ for R1 in "${R1_LIST[@]}"; do
   mkdir -p "${SDIR}"
   LOG="${LOG_DIR}/${SAMPLE}.bwa.log"; : > "${LOG}"
 
-  say "▶ Aligning ${SAMPLE}" | tee -a "${LOG}"
+  say "Aligning ${SAMPLE}" | tee -a "${LOG}"
   say "R1: ${R1}" | tee -a "${LOG}"
   say "R2: ${R2}" | tee -a "${LOG}"
 
@@ -110,7 +110,7 @@ for R1 in "${R1_LIST[@]}"; do
   samtools index -@ "${THREADS}" "${COOR_BAM}"
 
   samtools flagstat -@ "${THREADS}" "${COOR_BAM}" > "${SDIR}/${SAMPLE}.flagstat.txt"
-  say "✓ ${SAMPLE} → ${COOR_BAM}" | tee -a "${LOG}"
+  say "[OK] ${SAMPLE} -> ${COOR_BAM}" | tee -a "${LOG}"
   echo "----------------------------------------------"
 done
 

@@ -11,7 +11,7 @@ option_list = list(
   make_option(c("-i", "--identifier"), type="character", default=NA,help="Any character that can identify reads. e.g., accepted identifiers are chromosomes, full or partial CIGAR strings, full or partial read names and read sequences. Multiple features can be input in the following format: chr15,8M1D143M,AAGAGATGG. Comma corresponds to AND operator and vertical bar '|' to OR operator. Read help (Rscript extract_reads.R) to learn how to use this option properly", metavar="character"),
   make_option(c("-m", "--multiple"), type="character", default=NULL,help="Path to a file describing the location of multiple bam/sam files position and pattern. This should be a delimited text where the first line corresponds to file_path  position  pattern", metavar="character"),
   make_option(c("-s", "--split"), type="character", default="y",help="Options are 'y' or 'n'.One file per sample or not when -m is used", metavar="character"),
-  make_option(c("-o", "--output"), type="character", default=NULL,help="Path for output sam [MENDATORY]", metavar="character"))
+  make_option(c("-o", "--output"), type="character", default=NULL,help="Path for output sam [MANDATORY]", metavar="character"))
 
 #takes user input parameters
 opt_parser = OptionParser(option_list=option_list)

@@ -65,7 +65,7 @@ Optional:
   --ref FILE             Reference genome (default: Universal/hg19/hg19.fa)
   --annotated_panel FILE Pre-annotated panel (default: Universal/annotated_Myeloid_Panel_Targets.txt)
   --config FILE          Sample configuration file (default: {directory}/config.txt)
-  --threads N            Threads per sample (default: 6)
+  --threads N            Threads per sample (default: 2)
   --parallel_jobs N      Samples to run in parallel (default: 4)
   --use_parallel         Use parallel versions of scripts (flag)
   --force                Force re-run all stages even if outputs exist

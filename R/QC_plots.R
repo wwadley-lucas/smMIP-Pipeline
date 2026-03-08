@@ -40,7 +40,8 @@ if(opt$t=="gene"){
   sm$gene=gsub("_.*","",sm$smMIPs)
   sm=sm[order(gene)]
   n <- length(unique(sm$gene))
-  col.par = function(n) sample(seq(0.3, 1, length.out=250),n); 
+  set.seed(42)  # Ensure reproducible color assignment across runs
+  col.par = function(n) sample(seq(0.3, 1, length.out=250),n);
   cols = rainbow(n, s=col.par(n), v=col.par(n))[sample(1:n,n)]
   
   p1=ggplot(data=sm, aes(x=smMIPs, y=value, fill=gene)) +

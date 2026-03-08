@@ -1,6 +1,19 @@
 ########################################
 #### SOURCE FUNCTIONS
 #######################################
+#
+# NOTE (CLR-006): Progress reporting uses system("printf ...") calls throughout
+# this file. This is a known limitation — R's cat() does not support \r carriage
+# return for in-place progress updates. A future refactor could wrap this pattern
+# in a dedicated progress_report() helper, but the current approach works reliably
+# on Unix systems where /usr/bin/printf is available.
+#
+# NOTE (CLR-009): Functions in this file use 'd' as the parameter name for the
+# main data list object (e.g., filter.on.mappingscore(d)). The calling scripts
+# (map_smMIPs_extract_UMIs.R, calling_mutations.R) use 'data' as the variable
+# name. This is intentional — 'd' is the formal parameter, 'data' is the caller's
+# variable. No rename is needed; just be aware of the convention.
+#
 
 ########################################################################################
 ############## Source functions for map_smMIPs_extract_UMIs.R

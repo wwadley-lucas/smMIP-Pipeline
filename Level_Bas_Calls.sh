@@ -36,7 +36,7 @@ ensure_RMAX_in_Renviron() {
   fi
   echo 'R_MAX_VSIZE=120GB' >> "$renv"
   export R_MAX_VSIZE="120GB"
-  echo "ℹ️  R_MAX_VSIZE set to ${R_MAX_VSIZE}"
+  echo "[INFO] R_MAX_VSIZE set to ${R_MAX_VSIZE}"
 }
 
 clear_R_environment() {
@@ -67,19 +67,19 @@ run_one() {
            | xargs -0 ls -1t 2>/dev/null | head -n 1 || true)"
   fi
   if [[ -z "${bam:-}" || ! -f "$bam" ]]; then
-    echo "⚠️  No clean BAM found for sample '${sample}' under: $sample_dir" >&2
+    echo "[WARN] No clean BAM found for sample '${sample}' under: $sample_dir" >&2
     return 0
   fi
 
   # Skip if outputs already exist (unless FORCE_REDO=1)
   if sample_pileup_done "$sample" && [[ "$FORCE_REDO" != "1" ]]; then
-    echo "⏭️  ${sample} already processed — skipping."
+    echo "[SKIP] ${sample} already processed -- skipping."
     return 0
   fi
 
   log="${LOG_DIR}/${sample}.pileup.log"
   echo "---------------------------------------------"
-  echo "🔹 Processing: ${sample}"
+  echo ">> Processing: ${sample}"
   echo "    BAM: $bam"
   echo "    OUT: ${OUT_PILEUP}"
   echo "    LOG: ${log}"
@@ -107,17 +107,17 @@ run_one() {
   set -e
 
   if [[ $status -ne 0 ]]; then
-    echo "❌ R failed for ${sample} (exit $status). See: $log"
+    echo "[FAIL] R failed for ${sample} (exit $status). See: $log"
     return $status
   fi
 
   # Validate completion
   if ! sample_pileup_done "$sample"; then
-    echo "❗ Expected pileup outputs not found for ${sample}. See: $log"
+    echo "[ERROR] Expected pileup outputs not found for ${sample}. See: $log"
     return 3
   fi
 
-  echo "✅ Completed: ${sample}"
+  echo "[OK] Completed: ${sample}"
   clear_R_environment
   ensure_RMAX_in_Renviron
 }
@@ -131,4 +131,4 @@ while IFS= read -r -d '' d; do
   run_one "$d"
 done < <(find "$READPROC_DIR" -mindepth 1 -maxdepth 1 -type d -print0)
 
-echo "🎉 All eligible samples processed."
+echo "[DONE] All eligible samples processed."

@@ -4,8 +4,8 @@ library("optparse")
 
 ################ DEFINE THE INPUT PARAMETERS
 option_list = list(
-  make_option(c("-b", "--bam.file"), type="character", default=NULL,help="Path to the filtered bam file output by map_smMIPs_extract_UMIs.R (sample_clean.bam) [MENDATORY]", metavar="character"),
-  make_option(c("-p", "--panel.file"), type="character", default=NULL,help="Path to the smMIP design file [MENDATORY]", metavar="character"),
+  make_option(c("-b", "--bam.file"), type="character", default=NULL,help="Path to the filtered bam file output by map_smMIPs_extract_UMIs.R (sample_clean.bam) [MANDATORY]", metavar="character"),
+  make_option(c("-p", "--panel.file"), type="character", default=NULL,help="Path to the smMIP design file [MANDATORY]", metavar="character"),
   make_option(c("-s", "--sample.name"), type="character", default=NULL,help="Sample ID that will be used to name the output file(s). If not provided, the name of the folder containing the bam file is assumed to be the sample name", metavar="character"),
   make_option(c("-o", "--output"), type="character", default=NULL,help="Path for the output pileup file(s). If not supplied, the output will be saved within the folder that contain the bam file", metavar="character"),
   make_option(c("-O", "--tmp.output"), type="character", default=NULL,help="Path for temporary files. If not supplied, the tmp.output will be the same as defined by the -o option. When working on HPC, supplying a local folder to write and read temporary files can increase speed", metavar="character"),

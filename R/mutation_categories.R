@@ -5,7 +5,7 @@ library("optparse")
 ################ INPUT PARAMETERS
 #define parameters
 option_list = list(
-  make_option(c("-i", "--input"), type="character", default=NULL,help="Path to the output from calling_mutations.R. i.e., called_mutations.txt [MENDATORY]", metavar="character"),
+  make_option(c("-i", "--input"), type="character", default=NULL,help="Path to the output from calling_mutations.R. i.e., called_mutations.txt [MANDATORY]", metavar="character"),
   make_option(c("-c", "--code"), type="character", default=getwd(),help="Path to smMIP tools source functions file. If not supplied, it is assumed that the file (smMIPs_Function.R) is located in your working directory", metavar="character"))
 
 #takes user input parameters
