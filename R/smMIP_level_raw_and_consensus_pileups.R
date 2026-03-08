@@ -29,7 +29,7 @@ if (is.null(opt$bam.file) | is.null(opt$panel.file)){
 }
 
 if (is.null(opt$code)){ #load source functions
-  source(paste0(getwd,"/smMIPs_Functions.R"))
+  source(paste0(getwd(),"/smMIPs_Functions.R"))
 } else {
   source(paste0(opt$code,"/smMIPs_Functions.R"))
 }

@@ -827,7 +827,7 @@ prior.knowledge = function(d){
   #For the cosmic mutations there are only two statuses. Reported or not available
   idx_cosmic=which(!is.na(d$annotated.panel$cosmic))
   idx_maf=which(d$annotated.panel$maf>opt$maf)
-  idx=unique(idx_cosmic,idx_maf)
+  idx=unique(c(idx_cosmic,idx_maf))
 
   # to reduce the chance that cosmic mutation will be missed it looks at all the error rates in the cosmic positions in the control samples and use the median allele frequency at every allele.
   # if there is only a single control sample it will use the median across all the cosmic alleles (and the SNPs) in the control sample. VAF cut-off will be applied based on the user input

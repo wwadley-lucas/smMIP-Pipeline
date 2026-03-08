@@ -38,7 +38,7 @@ if ( !is.null(opt$panel.file) & is.null(opt$input)) {
 
 
 if (is.null(opt$code)){ #load source functions
-  source(paste0(getwd,"/smMIPs_Functions.R"))
+  source(paste0(getwd(),"/smMIPs_Functions.R"))
 } else {
   source(paste0(opt$code,"/smMIPs_Functions.R"))
 }
