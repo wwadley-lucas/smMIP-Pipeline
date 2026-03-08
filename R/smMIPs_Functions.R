@@ -52,32 +52,50 @@ filter.on.mappingscore<-function(d){
   d
 }
 
-#Filter reads that are not properly aligned as defined by the flags below
-filter.on.flag<-function(d){
-  cat("Filtering reads based on bad sam flag\n")
-  index=which(d$samtable$flag!=83 &
-                d$samtable$flag!=163 &
-                d$samtable$flag!=99 &
-                d$samtable$flag!=147 &
-                d$samtable$flag!=81 &
-                d$samtable$flag!=161 &
-                d$samtable$flag!=97 &
-                d$samtable$flag!=145)
-  d$summary$sam.flag.filtered.reads=length(index)
-  if(length(index)>0){
-    filtered<-d$samtable[index,]
-    filtered$reason="sam_flag"
-    d$filtered=rbind(d$filtered,filtered)
-    d$samtable=d$samtable[-index,]
+# Keep: paired + both mapped + primary (drop secondary/supplementary)
+filter.on.flag <- function(d,
+                           drop_qcfail   = TRUE,
+                           drop_dups     = TRUE,
+                           drop_interchrom = FALSE,
+                           drop_hardclip = TRUE,
+                           tlen_max      = NA_integer_) {
+
+  cat("Filtering: primary + paired + both mapped (discordant OK); no MAPQ filter here\n")
+
+  f <- as.integer(d$samtable$flag)
+
+  # Keep: paired, both mapped; drop: secondary, supplementary
+  keep <- (bitwAnd(f, 0x1)   != 0L) &   # paired
+          (bitwAnd(f, 0x4)   == 0L) &   # read mapped
+          (bitwAnd(f, 0x8)   == 0L) &   # mate mapped
+          (bitwAnd(f, 0x100) == 0L) &   # NOT secondary
+          (bitwAnd(f, 0x800) == 0L)     # NOT supplementary
+
+  if (isTRUE(drop_qcfail)) keep <- keep & (bitwAnd(f, 0x200) == 0L)  # NOT QC-fail
+  if (isTRUE(drop_dups))   keep <- keep & (bitwAnd(f, 0x400) == 0L)  # NOT duplicate
+
+  # NO MAPQ FILTER HERE — handled upstream via -M in your driver script
+
+  if (isTRUE(drop_interchrom) && all(c("rname","rnext") %in% names(d$samtable))) {
+    keep <- keep & (d$samtable$rname == d$samtable$rnext)
   }
+  if (isTRUE(drop_hardclip) && "cigar" %in% names(d$samtable)) {
+    keep <- keep & !grepl("H", d$samtable$cigar)
+  }
+  if (!is.na(tlen_max) && "tlen" %in% names(d$samtable)) {
+    keep <- keep & (abs(as.integer(d$samtable$tlen)) <= as.integer(tlen_max))
+  }
+
+  d$summary$sam.flag.filtered.reads <- sum(!keep)
+  d$samtable <- d$samtable[keep, , drop = FALSE]  # don’t accumulate d$filtered to save RAM
   d
 }
 
 # Filter reads that are align too close or too far from their mate.
 filter.on.mate_distance<-function(d){ #If there are smMIPs that were designed to detect known structural alternations (i.e., smMIPs arms falls on different chr), they will be filtered. If detection of such variants is required, an artificial genome reference is needed for read alignment
   cat("Filtering reads based on mate distance\n")
-  a=min(nchar(as.character(d$panel$ext.probe))+nchar(as.character(d$panel$lig.probe))+nchar(as.character(d$panel$target_seq)))-5 #-+5 allows some flexibility
-  b=max(nchar(as.character(d$panel$ext.probe))+nchar(as.character(d$panel$lig.probe))+nchar(as.character(d$panel$target_seq))+d$panel$length.left.umi+d$panel$length.right.umi)+5
+  a=min(nchar(as.character(d$panel$ext.probe))+nchar(as.character(d$panel$lig.probe))+nchar(as.character(d$panel$target_seq)))-10 #-+5 allows some flexibility
+  b=max(nchar(as.character(d$panel$ext.probe))+nchar(as.character(d$panel$lig.probe))+nchar(as.character(d$panel$target_seq))+d$panel$length.left.umi+d$panel$length.right.umi)+10
   index=which(abs(d$samtable$isize)>b | abs(d$samtable$isize)<a)
   d$summary$unexpected.mate.distance.filtered.reads=length(index)
   if(length(index)>0){
@@ -153,7 +171,10 @@ verify_mapping<-function(key,smmip,r1,r2,panel,isize){
       sam.record<-r[first.match,]
       read<-as.character(sam.record$seq)
       ### based on information in the sam.record, determine the arm/probe (extension or ligation) and the orientation of the probe to interrogate
-      if(sam.record$flag<100 & sam.record$isize>0){
+      # Use bitwise checks: 0x40 = first in pair, 0x80 = second in pair, 0x4 = unmapped, 0x100 = secondary
+      is.first  <- bitwAnd(as.integer(sam.record$flag), 0x40) != 0L
+      is.second <- bitwAnd(as.integer(sam.record$flag), 0x80) != 0L
+      if(is.first & sam.record$isize>0){
         probe.to.align<-reverse(chartr("ATGC","TACG",as.character(smmip.info$lig.probe)))
         n=nchar(probe.to.align)
         align_score=matchPattern(probe.to.align, read, max.mismatch=ceiling(0.25*n)) ##### allows 25% mismatch. Might change to user-defined parameters in next version
@@ -174,7 +195,7 @@ verify_mapping<-function(key,smmip,r1,r2,panel,isize){
           }
         }
 
-      } else if (sam.record$flag>100 & sam.record$isize<0){
+      } else if (is.second & sam.record$isize<0){
         probe.to.align<-reverse(chartr("ATGC","TACG",as.character(smmip.info$ext.probe)))
         n=nchar(probe.to.align)
         read=gsub("N",strsplit(probe.to.align,"")[[1]][n],read) #HOW DOES IT SUPPOSED TO BE IN THE OTHERS?
@@ -196,7 +217,7 @@ verify_mapping<-function(key,smmip,r1,r2,panel,isize){
           }
         }
 
-      } else if(sam.record$flag<100 & sam.record$isize<0){
+      } else if(is.first & sam.record$isize<0){
         probe.to.align<-as.character(smmip.info$lig.probe)
         n=nchar(probe.to.align)
         align_score=matchPattern(probe.to.align, read, max.mismatch=ceiling(0.25*n))
@@ -217,7 +238,7 @@ verify_mapping<-function(key,smmip,r1,r2,panel,isize){
           }
         }
 
-      } else if(sam.record$flag>100 & sam.record$isize>0){
+      } else if(is.second & sam.record$isize>0){
         probe.to.align<-as.character(smmip.info$ext.probe)
         read=gsub("N",strsplit(probe.to.align,"")[[1]][1],read)
         n=nchar(probe.to.align)
@@ -266,6 +287,16 @@ map.smips<-function(d){
   dnames=names(d$samtable)
   d$samtable = NULL
 
+  # Validate R1/R2 pairing: read names must match between odd/even rows
+  r1_names <- sub("/[12]$", "", as.character(R1$qname))
+  r2_names <- sub("/[12]$", "", as.character(R2$qname))
+  if (!all(r1_names == r2_names)) {
+    n_mismatch <- sum(r1_names != r2_names)
+    warning(paste0("R1/R2 read name mismatch detected - ", n_mismatch,
+                   " pairs may be incorrectly paired. ",
+                   "Alternating row pairing assumes sorted, complete pairs."))
+  }
+
   # determine the unique read "family/key". This is used for mapping back the assigned smmips in the list of sites back to the file records
   R1$lpos<-apply(R1[,c("pos","mpos")],1,min)
   R1$rpos<-R1$lpos+abs(R1$isize)-1
@@ -305,13 +336,13 @@ map.smips<-function(d){
     }
     cat(paste("There are",length(err.idx),"missing pieces of information to fill\n"))
     m.fill=list(mclapply(err.idx ,mc.cores = opt$threads, mc.cleanup=T, mc.silent=F ,function(i){
-    if(round(i/length(err.idx),1) %in% seq(0.1,1,0.1)) {
-      system(paste0("printf '\\rTrying to fill the missing data :  "," Attempt number ",attempt," ... '"))
-    }
-    if(round(i/length(err.idx),1) %in% seq(0,0.9,0.1)) {
+	if(round(i/length(err.idx),1) %in% seq(0.1,1,0.1)) {
+	  system(paste0("printf '\\rTrying to fill the missing data :  "," Attempt number ",attempt," ... '"))
+	}
+	if(round(i/length(err.idx),1) %in% seq(0,0.9,0.1)) {
           system(paste0("printf '\\rTrying to fill the missing data :  "," Attempt number ",attempt,"     '"))
         }
-    x<-sites[,c("rname","lpos","rpos")][i,]
+	x<-sites[,c("rname","lpos","rpos")][i,]
      map.smip_to_site(as.character(unlist(x[1])),as.integer(x[2]),as.integer(x[3]),d$panel)[[1]]
     }))
     m[[1]][err.idx]=m.fill[[1]]
@@ -427,25 +458,31 @@ extract_umi<-function(d){
   samtab<-as.data.frame(d$samtable)
   samtab$umi<-""
 
-  idx1=which(samtab$flag<100 & samtab$isize>0)
+  # Use bitwise checks instead of flag < 100 / flag > 100 threshold
+  # 0x40 = first in pair (R1), 0x80 = second in pair (R2)
+  f <- as.integer(samtab$flag)
+  is.first  <- bitwAnd(f, 0x40) != 0L
+  is.second <- bitwAnd(f, 0x80) != 0L
+
+  idx1=which(is.first & samtab$isize>0)
   m=match(samtab$smMIP[idx1],d$panel$id)
   samtab$umi[idx1]=substr(samtab$seq[idx1],1, d$panel$length.left.umi[m])
   idx2=unique(c(grep("N",samtab$umi[idx1]),which(samtab$cut1[idx1]=="NA")))
   samtab$umi[idx1[idx2]]=paste0(samtab$umi[idx1[idx2]],"flagged")
 
-  idx1=which(samtab$flag>100 & samtab$isize<0)
+  idx1=which(is.second & samtab$isize<0)
   m=match(samtab$smMIP[idx1],d$panel$id)
   samtab$umi[idx1]=substr(samtab$seq[idx1],nchar(samtab$seq[idx1])-d$panel$length.right.umi[m]+1,nchar(samtab$seq[idx1]))
   idx2=unique(c(grep("N",samtab$umi[idx1]),which(samtab$cut2[idx1]=="NA")))
   samtab$umi[idx1[idx2]]=paste0(samtab$umi[idx1[idx2]],"flagged")
 
-  idx1=which(samtab$flag<100 & samtab$isize<0)
+  idx1=which(is.first & samtab$isize<0)
   m=match(samtab$smMIP[idx1],d$panel$id)
   samtab$umi[idx1]=substr(samtab$seq[idx1],nchar(samtab$seq[idx1])-d$panel$length.left.umi[m]+1,nchar(samtab$seq[idx1]))
   idx2=unique(c(grep("N",samtab$umi[idx1]),which(samtab$cut1[idx1]=="NA")))
   samtab$umi[idx1[idx2]]=paste0(samtab$umi[idx1[idx2]],"flagged")
 
-  idx1=which(samtab$flag>100 & samtab$isize>0)
+  idx1=which(is.second & samtab$isize>0)
   m=match(samtab$smMIP[idx1],d$panel$id)
   samtab$umi[idx1]=substr(samtab$seq[idx1],1, as.numeric(d$panel$length.right.umi[m]))
   idx2=unique(c(grep("N",samtab$umi[idx1]),which(samtab$cut2[idx1]=="NA")))
@@ -568,7 +605,7 @@ pileup_foreach_smmip <- function(i){
   header_content <- readLines(header_file_path)
   sequence_content <- readLines(sequence_file_path)
   writeLines(c(header_content, sequence_content), final_file_path)
-    
+	
   suppressWarnings(asBam(paste0(opt$tmp.output,"/",opt$sample.name,"_",names(smmip_piles)[i],"_tmp.sam"),paste0(opt$tmp.output,"/",opt$sample.name,"_",names(smmip_piles)[i],"_tmp"),overwrite=T))
   invisible(file.remove(paste0(opt$tmp.output,"/",opt$sample.name,"_",names(smmip_piles)[i],"_tmp.sam")))
   bf <- open(BamFile(paste0(opt$tmp.output,"/",opt$sample.name,"_",names(smmip_piles)[i],"_tmp.bam")))
@@ -902,6 +939,7 @@ prior.knowledge = function(d){
 }
 
 pval.calculation = function(d){
+  d <- copy(d)  # prevent modification of caller's data.table via reference semantics (:=)
   control.names=d$control.names
   d$pval.plus=d$pval.minus=list()
   d$control.total.depth.plus=copy(d$total.depth.plus[,..control.names])
@@ -926,6 +964,12 @@ pval.calculation = function(d){
     d$pval.minus[[n]]=NA
 
     if(opt$binomial=="sum"){
+      # MTH-002: Pseudocount of 1 for error rate estimation
+      # When zero non-reference reads are observed in controls, a pseudocount of 1 is added
+      # to avoid a zero error rate estimate (which would make any variant infinitely significant).
+      # This is a Laplace-style smoothing: it provides a conservative floor on the background
+      # error rate, roughly equivalent to observing 1 error read across all control coverage.
+      # The resulting error rate = (sum_alt_counts + pseudocounts) / sum_total_depth.
       #plus
       d$control.non.ref.counts.plus[d$control.non.ref.counts.plus==0]=1
       ap=d$control.non.ref.counts.plus[,rowSums(.SD, na.rm=T),.SDcols=control.names]
@@ -974,7 +1018,7 @@ pval.calculation = function(d){
   cat("\n")
   d
 }
-                
+				
 pval.calculation.remained <- function(d){
   control.names=d$control.names
   d$control.total.depth.plus=copy(d$total.depth.plus[,..control.names])
@@ -1025,7 +1069,7 @@ pval.calculation.remained <- function(d){
     }
   }
   d
-}
+}				
 
 pval.correction.cdna.strand = function(d){
   system(paste0("printf '\\rAjusting P-values to account for the plus and minus replicated DNA strands...'"))
@@ -1585,3 +1629,4 @@ categorize=function(){
   write.table(lower.conf.calls.indels,file=paste0(dirname(opt$input),"/Lower_Confidence_Indels.txt"),col.names = T,row.names = F,quote = F,sep = '\t')
   cat("DONE\n")
 }
+

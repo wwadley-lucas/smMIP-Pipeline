@@ -97,6 +97,12 @@ if(length(which(!is.na(data$samples$replicate)))>0){ #experiment with replicates
 }
 
 ################  GENERATE A TABLE FOR MUTATIONS THAT PASSED THE P-VALUE CUT-OFF
+# MTH-001: Bonferroni correction
+# ps = total number of allele-position-smMIP combinations tested (the "family" of tests).
+# Bonferroni divides the user-supplied alpha by ps to control the family-wise error rate.
+# Assumption: tests are treated as independent. This is conservative because overlapping
+# smMIPs and strand-specific tests are correlated, making true FWER lower than nominal alpha.
+# When opt$pval == 1 the raw (uncorrected) threshold of 0.05 is used instead.
 ps=dim(data$annotated.panel)[1]
 if(opt$pval==1){
   opt$pval=0.05

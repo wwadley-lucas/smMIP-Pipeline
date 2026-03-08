@@ -58,7 +58,7 @@ for BAM in "${BAM_LIST[@]}"; do
   # Stats
   BEFORE=$(samtools view -c "${BAM}")
   AFTER=$(samtools view -c "${OUT_BAM}")
-  PCT=$(awk "BEGIN {printf \"%.1f\", (${AFTER}/${BEFORE})*100}")
+  PCT=$(awk -v after="$AFTER" -v before="$BEFORE" 'BEGIN {printf "%.1f", (after/before)*100}')
 
   say "  ${SAMPLE}: ${BEFORE} -> ${AFTER} reads (${PCT}% retained)"
 done

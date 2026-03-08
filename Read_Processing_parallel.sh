@@ -159,8 +159,8 @@ export -f process_one_sample
 say "Scanning for BAM files in ${BAM_DIR}..."
 
 # Build list of BAM files
-mapfile -d '' BAM_LIST < <(find "$BAM_DIR" -type f -name "*.primary.bam" -print0)
-[[ ${#BAM_LIST[@]} -gt 0 ]] || { echo "No .primary.bam files found in ${BAM_DIR}"; exit 1; }
+mapfile -d '' BAM_LIST < <(find "$BAM_DIR" -type f -name "*.filtered.bam" -print0)
+[[ ${#BAM_LIST[@]} -gt 0 ]] || { echo "No .filtered.bam files found in ${BAM_DIR}"; exit 1; }
 
 say "Found ${#BAM_LIST[@]} BAM files to process"
 say "Running ${PARALLEL_JOBS} samples in parallel with ${THREADS_PER_SAMPLE} threads each"
