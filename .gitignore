@@ -6,3 +6,8 @@
 *.aux
 *.log
 annotation_cache/
+
+# renv
+renv/library/
+renv/staging/
+renv/sandbox/

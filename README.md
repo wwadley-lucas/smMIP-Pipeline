@@ -1,391 +1,100 @@
----
-output:
-  pdf_document: default
-  html_document: default
----
-# smMIP Analysis Pipeline Overview
-## This pipeline utilizes the smMIPTools tool set that can be found at https://github.com/abelson-lab/smMIP-tools
-## This pipeline impliments alignment, pre-filtering BAM files systems that may get bloated in R, parallel processing and sample/patient reports based on final smMIPTools output
+# smMIP Targeted Sequencing Pipeline
 
-## Quick Start
+An end-to-end analysis pipeline for single-molecule Molecular Inversion Probe (smMIP) targeted sequencing data. Takes paired-end FASTQ files through alignment, UMI-aware read processing, variant pileup generation, statistical mutation calling, and optional CHIP (Clonal Hematopoiesis of Indeterminate Potential) population analysis with per-patient clinical reports.
+
+Built on top of [smMIP-tools](https://github.com/abelson-lab/smMIP-tools) (Abelson Lab, OICR) with added stages for alignment, BAM pre-filtering, parallel processing, and downstream CHIP analysis.
+
+## Prerequisites
+
+### Command-Line Tools
+
+| Tool | Version | Purpose |
+|------|---------|---------|
+| BWA (or bwa-mem2) | 0.7.17+ | Read alignment to reference genome |
+| samtools | 1.10+ | BAM filtering, sorting, indexing |
+| GNU parallel | (optional) | Parallel sample processing (`--use_parallel`) |
+| R | 4.4+ | All R-based analysis stages |
+
+### R Packages
+
+**Core pipeline (Stages 3-6):**
+
+- optparse
+- data.table
+- parallel
+- Rsamtools (Bioconductor)
+- IRanges (Bioconductor)
+- cellbaseR (Bioconductor) -- used by Stage 5 annotation
+
+**CHIP analysis (Stages 7-8):**
+
+- tidyverse
+- ComplexHeatmap (Bioconductor)
+- circlize
+- RColorBrewer
+- rmarkdown, knitr, kableExtra -- patient report rendering
+- rentrez -- ClinVar API queries
+
+Run `Rscript R/CHIP/install_deps.R` to install CHIP-stage dependencies automatically.
+
+### Reference Data
+
+- hg19 reference genome (indexed for BWA)
+- smMIP panel design file (MIPgen format, tab-delimited)
+
+## Pipeline Stages
+
+| Stage | Name | Script(s) | Description |
+|-------|------|-----------|-------------|
+| 1 | BWA Alignment | `BWA.sh` / `BWA_parallel.sh` | Align paired-end FASTQ reads to hg19 with BWA-MEM |
+| 2 | BAM Filtering | `filter_bam.sh` / `filter_bam_parallel.sh` | Filter for MAPQ >= 50 and properly paired reads |
+| 3 | Read Processing | `Read_Processing.sh` / `Read_Processing_parallel.sh` | Map reads to smMIP probes and extract UMIs (`map_smMIPs_extract_UMIs.R`) |
+| 4 | Pileup Generation | `Level_Bas_Calls.sh` / `Level_Bas_Calls_parallel.sh` | Generate raw and consensus (SSCS) pileups per smMIP (`smMIP_level_raw_and_consensus_pileups.R`) |
+| 5 | Panel Annotation | `Annotate_SNVs.R` | Annotate panel positions with gene, protein, COSMIC, MAF, and CADD scores (one-time per panel) |
+| 6 | Mutation Calling | `calling_mutations.R` | Call mutations using binomial error modeling with Bonferroni correction |
+| 7 | CHIP Analysis | `CHIP_analysis.R` | Population-level oncoplots, VAF heatmaps, co-mutation analysis |
+| 8 | Patient Reports | `generate_patient_reports.R` | Per-patient HTML/PDF reports with ClinVar annotations |
+
+## Usage
+
+### Basic Run (Stages 1-6)
 
 ```bash
-# Basic pipeline (Stages 1-6: FASTQ to mutation calls)
-bash /path/to/smMIP-Pipeline/Master_pipeline.sh \
+bash Master_pipeline.sh \
   --directory /path/to/experiment \
   --fastq_dir /path/to/experiment/RAW_FASTQ
+```
 
-# Full pipeline with CHIP analysis (Stages 1-8)
-bash /path/to/smMIP-Pipeline/Master_pipeline.sh \
+### Full Pipeline with CHIP Analysis (Stages 1-8)
+
+```bash
+bash Master_pipeline.sh \
   --directory /path/to/experiment \
   --fastq_dir /path/to/experiment/RAW_FASTQ \
   --chip_analysis
 ```
 
-## Pipeline Stages
-
-| Stage | Script | Description |
-|-------|--------|-------------|
-| 1 | BWA.sh | Align paired-end reads to hg19 reference |
-| 2 | filter_bam.sh | Filter for quality (MAPQ>=50, properly paired) |
-| 3 | Read_Processing.sh | Map reads to smMIP probes, extract UMIs |
-| 4 | Level_Bas_Calls.sh | Generate variant pileups at smMIP level |
-| 5 | Annotate_SNVs.R | Annotate panel with gene/protein/COSMIC info |
-| 6 | calling_mutations.R | Call mutations using statistical error modeling |
-| 7 | CHIP_analysis.R | Population-level CHIP analysis (oncoplots, VAF heatmaps) |
-| 8 | generate_patient_reports.R | Generate individual patient HTML/PDF reports |
-
-## Command-Line Parameters
-
-### Required Parameters
-
-| Parameter | Description |
-|-----------|-------------|
-| `--directory` | Base experiment directory (outputs go here) |
-| `--fastq_dir` | Directory containing raw FASTQ files |
-
-### Optional Parameters
-
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `--panel` | `Universal/Myeloid_Panel_Targets.chr.txt` | Panel design file |
-| `--ref` | `Universal/hg19/hg19.fa` | Reference genome |
-| `--annotated_panel` | `Universal/annotated_Myeloid_Panel_Targets.txt` | Pre-annotated panel |
-| `--config` | `{directory}/config.txt` | Sample configuration file |
-| `--threads` | 6 | Threads per sample |
-| `--parallel_jobs` | 4 | Samples to run in parallel |
-| `--use_parallel` | false | Use parallel versions of scripts (flag) |
-| `--force` | false | Force re-run all stages even if outputs exist |
-| `--start` | 1 | Start at this stage (1-8) |
-| `--stop` | 8 | Stop after this stage (1-8) |
-
-### CHIP Analysis Parameters (Stages 7-8)
-
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `--chip_analysis` | - | Shorthand for --stop 8 (CHIP analysis stages) |
-| `--chip_vaf` | 0.01 | VAF threshold for CHIP filtering |
-| `--chip_pval` | 0.05 | P-value threshold for CHIP filtering |
-| `--skip_reports` | false | Skip patient report generation (Stage 8) |
-| `--skip_clinvar` | false | Skip ClinVar API queries (faster reports) |
-| `--report_format` | html | Report format: html or pdf |
-
-## Directory Structure
-
-```
-{--directory}/
-├── bwa_out/                    # Stage 1 output
-│   ├── *.bam
-│   ├── *.bam.bai
-│   ├── *.flagstat.txt
-│   └── _logs/
-├── filtered_bam/               # Stage 2 output
-│   ├── *.filtered.bam
-│   ├── *.filtered.bam.bai
-│   └── _logs/
-├── Read_Processing/            # Stage 3 output
-│   ├── {sample}/
-│   │   ├── {sample}_clean.bam
-│   │   ├── {sample}_filtered_read_counts.txt
-│   │   ├── {sample}_raw_coverage_per_smMIP.txt
-│   │   └── {sample}_UMI_usage_per_smMIP.txt
-│   ├── pileup/                 # Stage 4 output
-│   │   ├── {sample}_raw_pileup.txt
-│   │   └── {sample}_sscs_pileup.txt
-│   └── _logs/
-├── results/                    # Stage 6 output
-│   └── called_mutations.txt
-├── CHIP_analysis/              # Stages 7-8 output
-│   ├── CHIP_oncoplot.pdf/png
-│   ├── VAF_heatmap.pdf/png
-│   ├── VAF_dotplot.pdf/png
-│   ├── co_mutation_heatmap.pdf
-│   ├── gene_mutation_summary.csv
-│   ├── variant_annotation_summary.csv
-│   ├── co_mutation_fisher_results.csv
-│   └── patient_reports/
-│       ├── {sample}_CHIP_Report.html
-│       └── annotation_cache/
-└── config.txt                  # Sample configuration
-```
-
-## Pipeline Flow Diagram
-
-```
-FASTQ files (*.R1*.fastq.gz, *.R2*.fastq.gz)
-    │
-    ▼
-┌─────────────────────────────────────────────────────────────┐
-│ Stage 1: BWA Alignment                                      │
-│ Script: BWA.sh / BWA_parallel.sh                            │
-│ Input:  *R1*.fastq.gz, *R2*.fastq.gz                        │
-│ Output: *.bam, *.bam.bai, *.flagstat.txt                    │
-└─────────────────────────────────────────────────────────────┘
-    │
-    ▼
-┌─────────────────────────────────────────────────────────────┐
-│ Stage 2: BAM Filtering                                      │
-│ Script: filter_bam.sh / filter_bam_parallel.sh              │
-│ Input:  *.bam from Stage 1                                  │
-│ Output: *.filtered.bam                                      │
-│ Filter: MAPQ >= 50, properly paired (-f 2)                  │
-└─────────────────────────────────────────────────────────────┘
-    │
-    ▼
-┌─────────────────────────────────────────────────────────────┐
-│ Stage 3: Read Processing / UMI Extraction                   │
-│ Script: Read_Processing.sh / Read_Processing_parallel.sh    │
-│ R Script: map_smMIPs_extract_UMIs.R                         │
-│ Input:  *.filtered.bam + Panel_Targets.txt                  │
-│ Output: Per sample directory containing:                    │
-│         - {sample}_clean.bam                                │
-│         - {sample}_filtered_read_counts.txt                 │
-│         - {sample}_raw_coverage_per_smMIP.txt               │
-│         - {sample}_UMI_usage_per_smMIP.txt                  │
-└─────────────────────────────────────────────────────────────┘
-    │
-    ▼
-┌─────────────────────────────────────────────────────────────┐
-│ Stage 4: Pileup Generation (Level Base Calls)               │
-│ Script: Level_Bas_Calls.sh / Level_Bas_Calls_parallel.sh    │
-│ R Script: smMIP_level_raw_and_consensus_pileups.R           │
-│ Input:  {sample}_clean.bam + Panel_Targets.txt              │
-│ Output: - {sample}_raw_pileup.txt                           │
-│         - {sample}_sscs_pileup.txt (consensus)              │
-└─────────────────────────────────────────────────────────────┘
-    │
-    ▼
-┌─────────────────────────────────────────────────────────────┐
-│ Stage 5: Panel Annotation (ONE-TIME per panel)              │
-│ R Script: Annotate_SNVs.R                                   │
-│ Input:  Panel_Targets.txt                                   │
-│ Output: annotated_Panel_Targets.txt                         │
-│ Annotations: gene, protein, COSMIC, MAF, CADD scores        │
-└─────────────────────────────────────────────────────────────┘
-    │
-    ▼
-┌─────────────────────────────────────────────────────────────┐
-│ Stage 6: Mutation Calling                                   │
-│ R Script: calling_mutations.R                               │
-│ Input:  - Pileup folder (*_raw_pileup.txt, *_sscs_pileup)   │
-│         - Configuration file (sample info)                  │
-│         - Annotated panel file                              │
-│ Output: called_mutations.txt                                │
-└─────────────────────────────────────────────────────────────┘
-    │
-    ▼
-  called_mutations.txt
-    │
-    ▼ (Optional: --chip_analysis)
-┌─────────────────────────────────────────────────────────────┐
-│ Stage 7: CHIP Population Analysis                           │
-│ R Script: CHIP_analysis.R                                   │
-│ Input:  called_mutations.txt                                │
-│ Output: - CHIP_oncoplot.pdf/png (mutation landscape)        │
-│         - VAF_heatmap.pdf/png (allele frequency matrix)     │
-│         - VAF_dotplot.pdf/png (VAF distribution)            │
-│         - co_mutation_heatmap.pdf (gene co-occurrence)      │
-│         - gene_mutation_summary.csv                         │
-│         - variant_annotation_summary.csv                    │
-│         - co_mutation_fisher_results.csv                    │
-└─────────────────────────────────────────────────────────────┘
-    │
-    ▼
-┌─────────────────────────────────────────────────────────────┐
-│ Stage 8: Patient Report Generation                          │
-│ R Script: generate_patient_reports.R                        │
-│ Input:  called_mutations.txt                                │
-│ Output: - patient_reports/{sample}_CHIP_Report.html         │
-│         Per-patient clinical-style reports with:            │
-│         - CHIP gene mutation summary                        │
-│         - ClinVar annotations                               │
-│         - Clinical significance assessment                  │
-│         - VAF visualizations                                │
-└─────────────────────────────────────────────────────────────┘
-    │
-    ▼
-  Patient Reports (HTML/PDF)
-```
-
-## Configuration File Format
-
-The configuration file (`config.txt`) describes sample metadata for mutation calling.
-
-### Format
-
-Tab-delimited file with columns:
-
-| Column | Description |
-|--------|-------------|
-| id | Sample ID (must match pileup filenames) |
-| type | Sample type: `case` or `control` |
-| replicate | Technical replicate pairing (or `NA`) |
-
-### Example
-
-```
-id	type	replicate
-Sample1	case	NA
-Sample2	case	NA
-Sample3	control	NA
-Sample4	case	rep1
-Sample5	case	rep1
-```
-
-### Auto-Generation
-
-If `--config` is not provided, the pipeline will:
-1. Scan the pileup directory for `*_raw_pileup.txt` files
-2. Extract sample IDs from filenames
-3. Generate a template `config.txt` with all samples as `case`
-4. **Stop and prompt user to edit the file**
-5. Re-run with `--start 6` to continue
-
-## Mutation Calling Parameters
-
-Key parameters for `calling_mutations.R`:
-
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `-s` | Required | Path to pileup folder |
-| `-f` | Required | Configuration file (sample layout) |
-| `-a` | Required | Annotated panel file |
-| `-b` | "sum" | Binomial error rate method ("sum" or "max") |
-| `-g` | 10 | Min coverage for overlap (R1/R2) |
-| `-m` | 0.001 | MAF cutoff to exclude known SNPs |
-| `-v` | 0.05 | VAF cutoff for error modeling |
-| `-p` | 0.05 | P-value cutoff (Bonferroni corrected) |
-| `-d` | 2 | Fold-difference for cross-sample VAF |
-| `-t` | 1 | Number of threads |
-
-## Output: called_mutations.txt
-
-Key columns in the final mutation calls:
-
-| Column | Description |
-|--------|-------------|
-| sample_ID | Sample identifier |
-| smMIP | smMIP probe name |
-| chr | Chromosome |
-| pos | Position (hg19) |
-| ref | Reference allele |
-| alt | Alternative allele |
-| gene | Gene symbol |
-| protein | Protein change (e.g., p.V600E) |
-| cosmic | COSMIC ID if known |
-| maf | Minor allele frequency (population) |
-| variant_type | SNV, insertion, deletion |
-| cadd_scaled | CADD pathogenicity score |
-| P-value | Raw p-value |
-| P-value.Bonferroni | Bonferroni-corrected p-value |
-| non.ref.counts | Non-reference allele counts |
-| total.depth | Total read depth |
-| allele.frequency | Variant allele frequency |
-| SSCS.* | Consensus-based metrics |
-| flags | Quality flags |
-
-## Output: CHIP Analysis (Stages 7-8)
-
-### Stage 7 Outputs
-
-| File | Description |
-|------|-------------|
-| `CHIP_oncoplot.pdf/png` | Mutation landscape visualization showing genes x samples |
-| `VAF_heatmap.pdf/png` | Heatmap of variant allele frequencies |
-| `VAF_dotplot.pdf/png` | Distribution of VAFs per gene |
-| `co_mutation_heatmap.pdf` | Gene co-occurrence/mutual exclusivity analysis |
-| `gene_mutation_summary.csv` | Frequency statistics per gene |
-| `variant_annotation_summary.csv` | Per-variant details with protein changes |
-| `co_mutation_fisher_results.csv` | Fisher's exact test results for co-mutation |
-
-### Stage 8 Outputs
-
-| File | Description |
-|------|-------------|
-| `patient_reports/{sample}_CHIP_Report.html` | Individual patient reports with: |
-| | - Clinically significant mutations (VAF ≥ 1%) |
-| | - Emerging clones (VAF < 1%) |
-| | - CHIP gene clinical summaries |
-| | - ClinVar pathogenicity annotations |
-| | - VAF visualizations |
-
-### CHIP Analysis Parameters
-
-| Parameter | CLI Flag | Default | Description |
-|-----------|----------|---------|-------------|
-| VAF threshold | `--chip_vaf` | 0.01 | Minimum VAF for CHIP filtering |
-| P-value threshold | `--chip_pval` | 0.05 | Maximum p-value for filtering |
-| Skip ClinVar | `--skip_clinvar` | false | Use local knowledge base only |
-| Report format | `--report_format` | html | Output format: html or pdf |
-
-## Usage Examples
-
-### Full Pipeline Run
+### Parallel Processing (recommended for large cohorts)
 
 ```bash
 bash Master_pipeline.sh \
   --directory /path/to/experiment \
-  --fastq_dir /path/to/fastqs
+  --fastq_dir /path/to/experiment/RAW_FASTQ \
+  --use_parallel --parallel_jobs 4 --threads 6
 ```
 
-### Parallel Processing (Recommended for Large Datasets)
+### Resume from a Specific Stage
 
 ```bash
+# Re-run only mutation calling after editing config.txt
 bash Master_pipeline.sh \
   --directory /path/to/experiment \
-  --fastq_dir /path/to/fastqs \
-  --use_parallel \
-  --parallel_jobs 4 \
-  --threads 6
-```
-
-### Resume from Specific Stage
-
-```bash
-# After editing config.txt, run only mutation calling
-bash Master_pipeline.sh \
-  --directory /path/to/experiment \
-  --fastq_dir /path/to/fastqs \
   --start 6 --stop 6
-```
 
-### Force Re-run All Stages
-
-```bash
-bash Master_pipeline.sh \
-  --directory /path/to/experiment \
-  --fastq_dir /path/to/fastqs \
-  --force
-```
-
-### Run CHIP Analysis on Existing Mutations
-
-```bash
-# Run only CHIP stages (7-8) on existing called_mutations.txt
+# Run CHIP stages on existing called_mutations.txt
 bash Master_pipeline.sh \
   --directory /path/to/experiment \
   --start 7 --stop 8
-```
-
-### Full Pipeline with CHIP Analysis
-
-```bash
-bash Master_pipeline.sh \
-  --directory /path/to/experiment \
-  --fastq_dir /path/to/fastqs \
-  --chip_analysis \
-  --report_format html
-```
-
-### CHIP Analysis with Custom Thresholds
-
-```bash
-bash Master_pipeline.sh \
-  --directory /path/to/experiment \
-  --start 7 --stop 8 \
-  --chip_vaf 0.02 \
-  --chip_pval 0.01 \
-  --skip_clinvar  # Faster, uses local knowledge base only
 ```
 
 ### Custom Panel and Reference
@@ -399,77 +108,116 @@ bash Master_pipeline.sh \
   --annotated_panel /path/to/annotated_panel.txt
 ```
 
-## Resource Requirements
+### Key Arguments
 
-### Memory
+| Argument | Default | Description |
+|----------|---------|-------------|
+| `--directory` | (required) | Base experiment directory for all outputs |
+| `--fastq_dir` | (required for stages 1-2) | Directory containing `*R1*.fastq.gz` / `*R2*.fastq.gz` |
+| `--bam_dir` | -- | Pre-aligned BAMs (use with `--start 3`) |
+| `--panel` | `Universal/Myeloid_Panel_Targets.chr.txt` | smMIP panel design file |
+| `--ref` | `Universal/hg19/hg19.fa` | BWA-indexed reference genome |
+| `--config` | `{directory}/config.txt` | Sample configuration (case/control assignments) |
+| `--threads` | 2 | Threads per sample |
+| `--parallel_jobs` | 4 | Samples to process in parallel |
+| `--use_parallel` | false | Enable parallel versions of shell scripts |
+| `--force` | false | Re-run stages even if outputs already exist |
+| `--start` / `--stop` | 1 / 8 | Stage range to execute |
+| `--chip_analysis` | -- | Shorthand for `--stop 8` |
+| `--chip_vaf` | 0.01 | VAF threshold for CHIP filtering |
+| `--chip_pval` | 0.05 | P-value threshold for CHIP filtering |
+| `--skip_reports` | false | Skip Stage 8 patient report generation |
+| `--skip_clinvar` | false | Skip ClinVar API queries (use local knowledge base only) |
+| `--report_format` | html | Patient report format: `html` or `pdf` |
 
-| Stage | Memory per Sample | Notes |
-|-------|-------------------|-------|
-| 1 (BWA) | ~8 GB | Scales with reference genome size |
-| 2 (Filter) | ~4 GB | I/O bound |
-| 3 (ReadProc) | ~30 GB | R memory-intensive |
-| 4 (Pileup) | ~25 GB | R memory-intensive |
-| 5 (Annotate) | ~8 GB | Network-bound (API calls) |
-| 6 (Mutations) | ~16 GB | Depends on cohort size |
-| 7 (CHIP) | ~16 GB | Scales with cohort size |
-| 8 (Reports) | ~8 GB | Per-sample, ClinVar API calls |
+## Input Format
 
-### Recommended Settings
+### FASTQ Files
 
-| System RAM | --parallel_jobs | --threads |
-|------------|-----------------|-----------|
-| 32 GB | 2 | 4 |
-| 64 GB | 3 | 6 |
-| 128 GB | 4 | 6 |
-| 256 GB | 8 | 6 |
+Paired-end FASTQ files with naming convention `*R1*.fastq.gz` and `*R2*.fastq.gz`. Place all samples in a single directory passed via `--fastq_dir`.
 
-## Dependencies
+### Panel Design File
 
-### Command-Line Tools
+Tab-delimited MIPgen-format file describing smMIP probe coordinates and sequences. Must contain columns: `mip_name`, `chr`, `ext_probe_start`, `ext_probe_stop`, `lig_probe_start`, `lig_probe_stop`, `ext_probe_sequence`, `lig_probe_sequence`, `mip_sequence`, `scan_target_sequence`, `mip_scan_start_position`, `mip_scan_stop_position`, `probe_strand`.
 
-- bwa (or bwa-mem2)
-- samtools
-- GNU parallel (for --use_parallel)
+### Sample Configuration (`config.txt`)
 
-### R Packages
+Tab-delimited file with three columns:
 
-Core Pipeline:
-- optparse
-- data.table
-- parallel
-- cellbaseR (for annotation)
-- IRanges
-- Rsamtools
+```
+id	type	replicate
+Sample1	case	NA
+Sample2	case	NA
+Sample3	control	NA
+Sample4	case	rep1
+Sample5	case	rep1
+```
 
-CHIP Analysis (Stages 7-8):
-- tidyverse
-- ComplexHeatmap (Bioconductor)
-- circlize
-- RColorBrewer
-- rmarkdown
-- knitr
-- kableExtra
-- rentrez (for ClinVar API)
+- **id**: Must match pileup filenames exactly (derived from FASTQ sample names).
+- **type**: `case` or `control`. Controls are used for error modeling.
+- **replicate**: Technical replicate grouping, or `NA`.
 
-## Troubleshooting
+If `--config` is not provided and no `config.txt` exists, the pipeline auto-generates a template at Stage 6, populates it with all samples as `case`, and pauses for the user to review before continuing.
 
-### Out of Memory
+## Output
 
-- Reduce `--parallel_jobs`
-- Ensure R_MAX_VSIZE is set (automatically handled by pipeline)
+```
+{--directory}/
+├── bwa_out/                    # Stage 1: aligned BAMs + flagstat
+├── filtered_bam/               # Stage 2: quality-filtered BAMs
+├── Read_Processing/            # Stage 3: per-sample UMI-processed reads
+│   ├── {sample}/
+│   │   ├── {sample}_clean.bam
+│   │   ├── {sample}_filtered_read_counts.txt
+│   │   ├── {sample}_raw_coverage_per_smMIP.txt
+│   │   └── {sample}_UMI_usage_per_smMIP.txt
+│   └── pileup/                 # Stage 4: variant pileups
+│       ├── {sample}_raw_pileup.txt
+│       └── {sample}_sscs_pileup.txt
+├── results/                    # Stage 6: final mutation calls
+│   └── called_mutations.txt
+├── CHIP_analysis/              # Stages 7-8
+│   ├── CHIP_oncoplot.pdf/png
+│   ├── VAF_heatmap.pdf/png
+│   ├── VAF_dotplot.pdf/png
+│   ├── co_mutation_heatmap.pdf
+│   ├── gene_mutation_summary.csv
+│   ├── variant_annotation_summary.csv
+│   ├── co_mutation_fisher_results.csv
+│   └── patient_reports/
+│       └── {sample}_CHIP_Report.html
+└── config.txt
+```
 
-### Missing R1/R2 Pairs
+### `called_mutations.txt` Columns
 
-- Check FASTQ naming convention matches `*R1*.fastq.gz` pattern
-- Use `--r1_glob` and `--r2_token` to customize pattern
+| Column | Description |
+|--------|-------------|
+| sample_ID | Sample identifier |
+| chr, pos, ref, alt | Genomic coordinates and alleles (hg19) |
+| gene | Gene symbol |
+| protein | Protein change (e.g., p.V600E) |
+| cosmic | COSMIC ID if annotated |
+| maf | Population minor allele frequency |
+| variant_type | SNV, insertion, or deletion |
+| cadd_scaled | CADD pathogenicity score |
+| P-value / P-value.Bonferroni | Raw and corrected p-values |
+| non.ref.counts / total.depth | Variant and total read counts |
+| allele.frequency | Variant allele frequency |
+| SSCS.* | Consensus sequence-based metrics |
+| flags | Quality warning flags (empty = passed) |
 
-### Stage Skip Not Working
+## Known Limitations
 
-- Use `--force` to override skip logic
-- Check that expected output files exist and are non-empty
+- **Reference genome**: The pipeline defaults to hg19. Using hg38 requires supplying `--ref` and `--panel` files built for GRCh38, and the annotation stage (Stage 5) must be re-run with `-g GRCh38`.
+- **Memory usage**: Stages 3 and 4 are R memory-intensive (~25-30 GB per sample). Reduce `--parallel_jobs` on systems with limited RAM.
+- **Panel annotation (Stage 5)**: Uses the CellBase API for variant annotation, which requires network access and can be slow on first run. Results are cached via the annotated panel file.
+- **ClinVar queries (Stage 8)**: Patient reports query the NCBI ClinVar API in real time. Use `--skip_clinvar` for faster report generation with local knowledge base only.
+- **FASTQ naming**: Expects `*R1*.fastq.gz` and `*R2*.fastq.gz` naming. Non-standard naming will cause Stage 1 to find no input files.
+- **Config auto-generation**: The auto-generated `config.txt` marks all samples as `case`. Users must manually set control samples before running Stage 6.
+- **Parallel scripts**: The `--use_parallel` flag requires GNU `parallel` to be installed and on the PATH.
+- **Single-panel design**: The pipeline processes one panel design per run. Multi-panel experiments require separate pipeline invocations.
 
-### Config File Issues
+## License
 
-- Ensure tab-delimited format
-- Sample IDs must match pileup filenames exactly
-- All samples need a type assignment (case or control)
+MIT License. Copyright (c) 2021 Ontario Institute for Cancer Research. See [LICENSE](LICENSE) for details.
